@@ -1,0 +1,37 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/bin/
+/dist/
+# Build output of `go build ./...` dropping a binary named after the module dir
+/golang-product-maschine
+
+# Test & coverage
+*.test
+*.out
+coverage.*
+profile.cov
+
+# bbolt data files (each app keeps its own .db; never commit local data)
+*.db
+*.bolt
+*.boltdb
+
+# Go workspace / vendor
+/vendor/
+go.work
+go.work.sum
+
+# Editor / OS
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
+
+# Local env
+.env
+.env.local
