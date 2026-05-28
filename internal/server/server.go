@@ -9,7 +9,6 @@ package server
 import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-
 	"techthos.net/microstore/internal/app"
 	"techthos.net/microstore/internal/models"
 )

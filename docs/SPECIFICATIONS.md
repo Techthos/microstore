@@ -46,7 +46,12 @@ you've installed and the app's own configuration.
 - **No offline catalog cache.** Online-only: if GitHub is unreachable, browse/search/install/scaffold
   fail with a clear error. bbolt is **not** a catalog mirror.
 - **No package-manager PATH management.** Installs go to a managed directory; microstore does not
-  symlink onto `PATH` or manage system-wide installation.
+  symlink onto `PATH` or manage system-wide installation, and it never rewrites `PATH` silently. It
+  *does* check on TUI launch whether `InstallDir` is on the current `$PATH` and, when it is not, warn
+  the user and — only on explicit confirmation — append a single `export PATH="$PATH:<InstallDir>"`
+  line to their shell profile (see TUI Surface). That opt-in profile edit is the sole extent of PATH
+  involvement; there is no symlinking, no system-wide install, and no change to the running process's
+  `PATH`.
 - **Scaffolding does not configure the project.** It does not set the Go module path, run `git init`,
   or rename anything — that is the job of the downstream `/app-init` step. microstore lays down the
   bare template and initiates `/product-idea`.
@@ -155,7 +160,8 @@ Each use-case names the entities, the surface(s), and the repository/service ope
 6. **Install app.** *Entities:* `Release`, `Asset`, `InstalledApp`. *Surfaces:* TUI, MCP. Resolve the
    target release (default: latest non-prerelease, or a specified tag), detect host `GOOS/GOARCH`,
    match an asset by naming convention, fetch the release's `checksums.txt`, download the asset,
-   **verify SHA-256**, write it to `InstallDir` with `0755`, and record an `InstalledApp`. On zero or
+   **verify SHA-256**, write it to `InstallDir` as `microapp-<name>` (the repo's bare name, prefixed;
+   any `.exe` suffix preserved on Windows) with `0755`, and record an `InstalledApp`. On zero or
    ambiguous asset matches, fall back to manual asset selection. If no checksums file is found,
    installation is **refused** unless an explicit "allow unverified" override is given. *Ops:* GitHub
    fetch + installer + `InstallRepo.Save`.
@@ -273,6 +279,15 @@ Five screens stacked in `Pages`; a persistent status bar shows progress/errors.
                     Pre-filled from the stored config (defaults on first run).
 ```
 
+### Launch-time PATH check
+On startup the TUI checks whether the configured `InstallDir` is present on the current `$PATH`. If it
+is **not** (and `InstallDir` is set), a modal warns that installed binaries won't be runnable from a
+shell and shows the exact `export PATH="$PATH:<InstallDir>"` line. The modal offers two actions:
+**Add to `<profile>`** appends that line to the user's shell profile (resolved from `$SHELL`:
+`~/.zshrc` for zsh, `~/.bashrc` otherwise) — idempotently, creating the file if absent — and **Dismiss**
+closes it. The profile edit takes effect in future shells; the running process's `PATH` is unchanged.
+When `InstallDir` is already on `$PATH`, no modal appears.
+
 ### Key interactions
 - **Global:** `Tab`/`Shift-Tab` cycle screens; `q` or `Ctrl-C` quit (always available); status bar
   reports in-flight network/disk operations and errors.
@@ -304,8 +319,9 @@ Five screens stacked in `Pages`; a persistent status bar shows progress/errors.
 - **UC 5 — Releases:** Returns releases newest-first; prereleases are flagged and excluded from
   "latest" resolution.
 - **UC 6 — Install:** On a host where exactly one asset matches `GOOS/GOARCH`, microstore downloads it,
-  the computed SHA-256 equals the `checksums.txt` entry, the file lands in `InstallDir` mode `0755`,
-  and an `InstalledApp` record exists keyed by slug. A checksum mismatch aborts the install, writes no
+  the computed SHA-256 equals the `checksums.txt` entry, the file lands in `InstallDir` named
+  `microapp-<name>` (the repo's bare name, prefixed) mode `0755`, and an `InstalledApp` record exists
+  keyed by slug with its `Path` pointing at that file. A checksum mismatch aborts the install, writes no
   record, and leaves no partial binary. Zero/ambiguous matches trigger manual selection (TUI) or an
   error result enumerating assets (MCP). A missing checksums file refuses install unless
   `allow_unverified` is set.
@@ -323,6 +339,12 @@ Five screens stacked in `Pages`; a persistent status bar shows progress/errors.
   rejected). A non-empty target is refused unless `force`. After extraction, `/product-idea` is
   initiated (TUI launches `claude`, or prints the exact command if unavailable; MCP returns the
   next-step instruction). The module path is **not** modified and `git init` is **not** run.
+- **PATH check (TUI launch):** When `InstallDir` is absent from `$PATH`, launching the TUI raises a
+  modal showing the exact `export PATH="$PATH:<InstallDir>"` line and the target shell profile
+  (`~/.zshrc` for zsh, else `~/.bashrc`). Confirming appends that line to the profile (idempotently;
+  the file is created if missing) and leaves the running process's `PATH` unchanged; dismissing makes
+  no change. When `InstallDir` is already on `$PATH`, no modal appears. microstore never modifies the
+  profile without confirmation and never alters `PATH` by any other means.
 - **Cross-cutting:** In `serve`/`mcp` mode no logs are written to stdout. bbolt is opened with a
   `Timeout`; a second writer process fails fast rather than hanging. The TUI never blocks its event
   loop during network/disk operations.
@@ -344,9 +366,13 @@ Five screens stacked in `Pages`; a persistent status bar shows progress/errors.
   arch token for the host runtime, with aliases: `amd64`↔`x86_64`/`x64`, `arm64`↔`aarch64`,
   `386`↔`i386`/`x86`, `darwin`↔`macos`/`osx`, `windows`↔`win` (`.exe`). This matches the template's
   `build-and-release` output. *Assumption — irregularly named releases fall back to manual pick.*
-- **Checksums file.** Looked up among release assets by name `checksums.txt` / `SHA256SUMS`
-  (case-insensitive), parsed as `<hex>  <filename>` lines. Absent ⇒ install refused unless explicitly
-  allowed. *Assumption — confirm against the actual release artifact names.*
+- **Checksums.** Two artifact shapes are accepted, both parsed as `sha256sum`-style
+  `<hex>  <filename>` lines (case-insensitive): a **per-asset sidecar** named `<asset>.sha256`
+  (what the template's `build-and-release` workflow uploads — preferred when present), or an
+  **aggregated** file named `checksums.txt` / `SHA256SUMS` (goreleaser-style). A single-entry
+  sidecar falls back to its sole line if the recorded inner name differs. Sidecar files are excluded
+  from host asset matching so they are never mistaken for an installable binary. No checksum source
+  for the chosen asset ⇒ install refused unless explicitly allowed (`allow_unverified`).
 - **`/product-idea` hand-off depends on the `claude` CLI** being on `PATH`; microstore's core never
   requires it — when absent it prints the exact command to run. *Assumption accepted.*
 - **Prompts.** None in v1; a "suggest an app for a task" MCP prompt is a candidate for later.

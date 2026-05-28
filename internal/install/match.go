@@ -42,13 +42,15 @@ var (
 )
 
 // MatchAssets returns the assets whose names declare the given host OS and arch.
-// Checksums files are skipped. Zero matches means manual selection is needed;
-// more than one means the match is ambiguous.
+// Checksums files — aggregated ("checksums.txt") and per-asset sidecars
+// ("<asset>.sha256") alike — are skipped, so a sidecar carrying the host's
+// os/arch tokens is never mistaken for an installable binary. Zero matches means
+// manual selection is needed; more than one means the match is ambiguous.
 func MatchAssets(assets []models.Asset, goos, goarch string) []models.Asset {
 	var out []models.Asset
 	for _, a := range assets {
 		name := strings.ToLower(a.Name)
-		if isChecksumsName(name) {
+		if isChecksumsName(name) || isChecksumSidecar(name) {
 			continue
 		}
 		if detect(osAliases, name) == goos && detect(archAliases, name) == goarch {

@@ -106,7 +106,7 @@ func (in *Installer) Install(ctx context.Context, entry models.ManifestEntry, re
 // installs are explicitly allowed. It returns an error when verification is
 // required but impossible.
 func (in *Installer) expectedSum(ctx context.Context, rel models.Release, asset models.Asset, opts Options) (string, error) {
-	checksumAsset, ok := findChecksumsAsset(rel.Assets)
+	src, ok := findChecksumSource(rel.Assets, asset.Name)
 	if !ok {
 		if opts.AllowUnverified {
 			return "", nil
@@ -114,18 +114,16 @@ func (in *Installer) expectedSum(ctx context.Context, rel models.Release, asset 
 		return "", fmt.Errorf("release %s has no checksums file; refusing install (allow_unverified to override)", rel.TagName)
 	}
 	var buf bytes.Buffer
-	if _, err := in.dl.Download(ctx, checksumAsset.DownloadURL, &buf); err != nil {
+	if _, err := in.dl.Download(ctx, src.DownloadURL, &buf); err != nil {
 		return "", fmt.Errorf("download checksums: %w", err)
 	}
-	sums := parseChecksums(buf.Bytes())
-	h, found := sums[asset.Name]
-	if !found {
-		if opts.AllowUnverified {
-			return "", nil
-		}
-		return "", fmt.Errorf("no checksum entry for %q; refusing install (allow_unverified to override)", asset.Name)
+	if h := sumFor(buf.Bytes(), asset.Name); h != "" {
+		return h, nil
 	}
-	return h, nil
+	if opts.AllowUnverified {
+		return "", nil
+	}
+	return "", fmt.Errorf("no checksum entry for %q; refusing install (allow_unverified to override)", asset.Name)
 }
 
 // VerifyStatus is the outcome of re-verifying an installed binary.
@@ -173,6 +171,33 @@ func isChecksumsName(lowerName string) bool {
 	return false
 }
 
+// isChecksumSidecar reports whether name is a per-asset checksum sidecar such as
+// "app-v1-linux-amd64.sha256" — the form `sha256sum bin > bin.sha256` produces,
+// which is exactly what the build-and-release workflow uploads.
+func isChecksumSidecar(lowerName string) bool {
+	return strings.HasSuffix(lowerName, ".sha256") || strings.HasSuffix(lowerName, ".sha256sum")
+}
+
+// findChecksumSource returns the asset carrying the expected SHA-256 for
+// assetName: a per-asset sidecar "<assetName>.sha256" when present, otherwise an
+// aggregated checksums file (goreleaser-style).
+func findChecksumSource(assets []models.Asset, assetName string) (models.Asset, bool) {
+	if side, ok := findSidecarAsset(assets, assetName); ok {
+		return side, true
+	}
+	return findChecksumsAsset(assets)
+}
+
+func findSidecarAsset(assets []models.Asset, assetName string) (models.Asset, bool) {
+	want := strings.ToLower(assetName) + ".sha256"
+	for _, a := range assets {
+		if strings.ToLower(a.Name) == want {
+			return a, true
+		}
+	}
+	return models.Asset{}, false
+}
+
 func findChecksumsAsset(assets []models.Asset) (models.Asset, bool) {
 	for _, a := range assets {
 		if isChecksumsName(strings.ToLower(a.Name)) {
@@ -180,6 +205,22 @@ func findChecksumsAsset(assets []models.Asset) (models.Asset, bool) {
 		}
 	}
 	return models.Asset{}, false
+}
+
+// sumFor extracts the hex SHA-256 for assetName from sha256sum-format data
+// ("<hex>  <name>" lines). A single-asset sidecar may record a different inner
+// name (e.g. a path), so fall back to its sole entry when there is exactly one.
+func sumFor(data []byte, assetName string) string {
+	sums := parseChecksums(data)
+	if h, ok := sums[assetName]; ok {
+		return h
+	}
+	if len(sums) == 1 {
+		for _, h := range sums {
+			return h
+		}
+	}
+	return ""
 }
 
 // parseChecksums parses "<hex>  <filename>" lines (filename may carry a leading
@@ -202,11 +243,16 @@ func parseChecksums(data []byte) map[string]string {
 	return out
 }
 
+// placedName is the filename an installed binary takes under InstallDir: the
+// repo's bare name (the segment after "owner/") prefixed with "microapp-", so
+// every installed micro-app is recognisable and grouped on a shared PATH. A
+// ".exe" suffix is preserved for Windows assets.
 func placedName(repo, assetName string) string {
 	name := repo
 	if i := strings.LastIndex(repo, "/"); i >= 0 {
 		name = repo[i+1:]
 	}
+	name = "microapp-" + name
 	if strings.HasSuffix(strings.ToLower(assetName), ".exe") && !strings.HasSuffix(strings.ToLower(name), ".exe") {
 		name += ".exe"
 	}

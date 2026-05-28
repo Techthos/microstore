@@ -35,12 +35,15 @@ func (f *fakeGH) FetchCatalog(_ context.Context, url string) (models.Catalog, er
 	}
 	return f.catalog, nil
 }
+
 func (f *fakeGH) RepoInfo(_ context.Context, _ string) (models.RepoInfo, error) {
 	return f.repoInfo, nil
 }
+
 func (f *fakeGH) Releases(_ context.Context, _ string) ([]models.Release, error) {
 	return f.releases, nil
 }
+
 func (f *fakeGH) LatestRelease(_ context.Context, _ string) (models.Release, error) {
 	for _, r := range f.releases {
 		if !r.Prerelease {
@@ -49,6 +52,7 @@ func (f *fakeGH) LatestRelease(_ context.Context, _ string) (models.Release, err
 	}
 	return models.Release{}, fmt.Errorf("no published release")
 }
+
 func (f *fakeGH) Download(_ context.Context, url string, w io.Writer) (int64, error) {
 	b, ok := f.blobs[url]
 	if !ok {
@@ -57,6 +61,7 @@ func (f *fakeGH) Download(_ context.Context, url string, w io.Writer) (int64, er
 	n, err := w.Write(b)
 	return int64(n), err
 }
+
 func (f *fakeGH) Tarball(_ context.Context, _, _ string) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(f.tarball)), nil
 }
@@ -122,6 +127,78 @@ func TestConfigRoundTrip(t *testing.T) {
 	}
 	if got != cfg {
 		t.Errorf("config = %+v, want %+v", got, cfg)
+	}
+}
+
+func TestPathStatus(t *testing.T) {
+	// t.Setenv forbids t.Parallel.
+	store := newStore(t)
+	svc := app.New(&fakeGH{}, store)
+	bin := t.TempDir()
+	if err := svc.SetConfig(models.Config{InstallDir: bin}); err != nil {
+		t.Fatalf("SetConfig: %v", err)
+	}
+	t.Setenv("SHELL", "/bin/zsh")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	t.Run("not on path", func(t *testing.T) {
+		t.Setenv("PATH", "/usr/bin")
+		st, err := svc.PathStatus()
+		if err != nil {
+			t.Fatalf("PathStatus: %v", err)
+		}
+		if st.OnPath {
+			t.Error("OnPath = true, want false")
+		}
+		if st.InstallDir != bin {
+			t.Errorf("InstallDir = %q, want %q", st.InstallDir, bin)
+		}
+		if want := filepath.Join(home, ".zshrc"); st.ProfilePath != want {
+			t.Errorf("ProfilePath = %q, want %q", st.ProfilePath, want)
+		}
+		if !strings.Contains(st.ExportLine, bin) {
+			t.Errorf("ExportLine = %q, want it to mention %q", st.ExportLine, bin)
+		}
+	})
+
+	t.Run("on path", func(t *testing.T) {
+		t.Setenv("PATH", "/usr/bin"+string(os.PathListSeparator)+bin)
+		st, err := svc.PathStatus()
+		if err != nil {
+			t.Fatalf("PathStatus: %v", err)
+		}
+		if !st.OnPath {
+			t.Error("OnPath = false, want true")
+		}
+	})
+}
+
+func TestAddToPath(t *testing.T) {
+	store := newStore(t)
+	svc := app.New(&fakeGH{}, store)
+	bin := t.TempDir()
+	if err := svc.SetConfig(models.Config{InstallDir: bin}); err != nil {
+		t.Fatalf("SetConfig: %v", err)
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("SHELL", "/bin/bash")
+	t.Setenv("PATH", "/usr/bin")
+
+	st, err := svc.AddToPath()
+	if err != nil {
+		t.Fatalf("AddToPath: %v", err)
+	}
+	data, err := os.ReadFile(st.ProfilePath)
+	if err != nil {
+		t.Fatalf("read profile %q: %v", st.ProfilePath, err)
+	}
+	if !strings.Contains(string(data), st.ExportLine) {
+		t.Errorf("profile missing export line %q:\n%s", st.ExportLine, data)
+	}
+	if want := filepath.Join(home, ".bashrc"); st.ProfilePath != want {
+		t.Errorf("ProfilePath = %q, want %q", st.ProfilePath, want)
 	}
 }
 

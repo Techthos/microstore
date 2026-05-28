@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	bolt "go.etcd.io/bbolt"
-
 	"techthos.net/microstore/internal/models"
 )
 

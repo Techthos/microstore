@@ -67,6 +67,54 @@ func TestDistinctCategories(t *testing.T) {
 	}
 }
 
+func TestTabsText(t *testing.T) {
+	t.Parallel()
+	got := tabsText(pageInstalled)
+	for _, want := range []string{"1 Catalog", "3 Installed", "5 Config"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("tabsText missing %q in:\n%s", want, got)
+		}
+	}
+	// The active page is highlighted with the reverse style tag.
+	if !strings.Contains(got, "[black:aqua:b] 3 Installed ") {
+		t.Errorf("active tab not highlighted: %s", got)
+	}
+}
+
+func TestHintFor(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		pageCatalog:   "search",
+		pageDetail:    "install",
+		pageInstalled: "uninstall",
+		pageNew:       "scaffold",
+		pageConfig:    "save",
+	}
+	for page, want := range cases {
+		if h := hintFor(page); !strings.Contains(h, want) {
+			t.Errorf("hintFor(%q) missing %q in %q", page, want, h)
+		}
+		if h := hintFor(page); !strings.Contains(h, "quit") {
+			t.Errorf("hintFor(%q) missing global quit hint", page)
+		}
+	}
+}
+
+func TestPathWarningText(t *testing.T) {
+	t.Parallel()
+	st := app.PathStatus{
+		InstallDir:  "/home/u/.local/share/microstore/bin",
+		ProfilePath: "/home/u/.bashrc",
+		ExportLine:  `export PATH="$PATH:/home/u/.local/share/microstore/bin"`,
+	}
+	got := pathWarningText(st)
+	for _, want := range []string{st.InstallDir, st.ProfilePath, st.ExportLine, "not on your PATH"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("pathWarningText missing %q in:\n%s", want, got)
+		}
+	}
+}
+
 func TestNextPrevPage(t *testing.T) {
 	t.Parallel()
 	if nextPage(pageCatalog) != pageDetail {

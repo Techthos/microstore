@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-
 	"techthos.net/microstore/internal/app"
 	"techthos.net/microstore/internal/install"
 	"techthos.net/microstore/internal/models"
@@ -29,12 +29,16 @@ type Service interface {
 	Scaffold(ctx context.Context, templateRepo, targetDir, ref string, force bool) (app.ScaffoldResult, error)
 	GetConfig() (models.Config, error)
 	SetConfig(models.Config) error
+	PathStatus() (app.PathStatus, error)
+	AddToPath() (app.PathStatus, error)
 }
 
 // App owns the single tview.Application and the four screens.
 type App struct {
 	app    *tview.Application
 	pages  *tview.Pages
+	tabs   *tview.TextView
+	hint   *tview.TextView
 	status *tview.TextView
 	root   tview.Primitive
 	svc    Service
@@ -67,11 +71,14 @@ func New(svc Service) *App {
 	a := &App{
 		app:         tview.NewApplication(),
 		pages:       tview.NewPages(),
+		tabs:        tview.NewTextView().SetDynamicColors(true),
+		hint:        tview.NewTextView().SetDynamicColors(true),
 		status:      tview.NewTextView().SetDynamicColors(true),
 		svc:         svc,
 		verifyState: map[string]string{},
 	}
-	a.status.SetText("Tab: switch screen · q: quit")
+	a.tabs.SetText(tabsText(pageCatalog))
+	a.hint.SetText(hintFor(pageCatalog))
 
 	a.buildCatalog()
 	a.buildDetail()
@@ -86,7 +93,9 @@ func New(svc Service) *App {
 	a.pages.AddPage(pageConfig, a.configPage(), true, false)
 
 	a.root = tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(a.tabs, 1, 0, false).
 		AddItem(a.pages, 0, 1, true).
+		AddItem(a.hint, 1, 0, false).
 		AddItem(a.status, 1, 0, false)
 
 	a.app.SetInputCapture(a.globalKeys)
@@ -105,12 +114,13 @@ func (a *App) Run() error {
 	go a.loadInstalled()
 	go a.loadTemplates()
 	go a.loadConfig()
+	go a.checkPath()
 	return a.app.SetRoot(a.root, true).EnableMouse(true).Run()
 }
 
 func (a *App) globalKeys(ev *tcell.EventKey) *tcell.EventKey {
 	front, _ := a.pages.GetFrontPage()
-	if front == pageAssetPick || front == pageConfirm {
+	if front == pageAssetPick || front == pageConfirm || front == pageWarnPath {
 		return ev // let the overlay handle everything
 	}
 	switch ev.Key() {
@@ -124,9 +134,18 @@ func (a *App) globalKeys(ev *tcell.EventKey) *tcell.EventKey {
 		a.switchTo(prevPage(front))
 		return nil
 	case tcell.KeyRune:
-		if ev.Rune() == 'q' {
-			if _, typing := a.app.GetFocus().(*tview.InputField); !typing {
-				a.app.Stop()
+		// While typing in a field, runes belong to the input, not to navigation.
+		if _, typing := a.app.GetFocus().(*tview.InputField); typing {
+			return ev
+		}
+		r := ev.Rune()
+		if r == 'q' {
+			a.app.Stop()
+			return nil
+		}
+		if r >= '1' && r <= '9' {
+			if idx := int(r - '1'); idx < len(pageOrder) {
+				a.switchTo(pageOrder[idx])
 				return nil
 			}
 		}
@@ -136,6 +155,8 @@ func (a *App) globalKeys(ev *tcell.EventKey) *tcell.EventKey {
 
 func (a *App) switchTo(page string) {
 	a.pages.SwitchToPage(page)
+	a.tabs.SetText(tabsText(page))
+	a.hint.SetText(hintFor(page))
 	a.app.SetFocus(a.focusFor(page))
 }
 
@@ -168,9 +189,20 @@ func (a *App) buildCatalog() {
 			a.openDetail(a.catalogApps[row-1].Repo)
 		}
 	})
+	// `/` jumps to the search field (per spec); the table otherwise owns focus
+	// so arrow keys and the 1-5 quick-switch work without stealing keystrokes.
+	a.catalog.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+		if ev.Key() == tcell.KeyRune && ev.Rune() == '/' {
+			a.app.SetFocus(a.catalogSearch)
+			return nil
+		}
+		return ev
+	})
 
 	a.catalogSearch = tview.NewInputField().SetLabel("Search: ")
 	a.catalogSearch.SetChangedFunc(func(string) { a.applyCatalogFilter() })
+	// Enter/Esc hand focus back to the results table.
+	a.catalogSearch.SetDoneFunc(func(tcell.Key) { a.app.SetFocus(a.catalog) })
 
 	a.catalogCat = tview.NewDropDown().SetLabel("Category: ")
 	a.catalogCat.SetOptions([]string{"(all)"}, nil)
@@ -180,11 +212,11 @@ func (a *App) buildCatalog() {
 
 func (a *App) catalogPage() tview.Primitive {
 	controls := tview.NewFlex().
-		AddItem(a.catalogSearch, 0, 2, true).
+		AddItem(a.catalogSearch, 0, 2, false).
 		AddItem(a.catalogCat, 0, 1, false)
 	return tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(controls, 1, 0, true).
-		AddItem(a.catalog, 0, 1, false)
+		AddItem(controls, 1, 0, false).
+		AddItem(a.catalog, 0, 1, true)
 }
 
 func (a *App) loadCatalog() {
@@ -502,6 +534,57 @@ func (a *App) launchProductIdea(dir string) {
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 		_ = cmd.Run()
 	})
+}
+
+// --- PATH check (launch) ---
+
+// checkPath runs once at launch: if the managed InstallDir is not on $PATH,
+// installed binaries won't be runnable from a shell, so it raises a modal
+// offering to append the export line to the user's shell profile.
+func (a *App) checkPath() {
+	st, err := a.svc.PathStatus()
+	a.app.QueueUpdateDraw(func() {
+		if err != nil {
+			a.setStatus("[red]path check: %s", err.Error())
+			return
+		}
+		if st.OnPath || st.InstallDir == "" {
+			return
+		}
+		a.showPathWarning(st)
+	})
+}
+
+// showPathWarning displays the launch-time PATH advisory. "Add" appends the
+// export line to the resolved shell profile; "Dismiss" closes the overlay.
+func (a *App) showPathWarning(st app.PathStatus) {
+	addLabel := "Add to " + filepath.Base(st.ProfilePath)
+	modal := tview.NewModal().
+		SetText(pathWarningText(st)).
+		AddButtons([]string{addLabel, "Dismiss"}).
+		SetDoneFunc(func(_ int, label string) {
+			a.pages.RemovePage(pageWarnPath)
+			a.app.SetFocus(a.focusFor(pageCatalog))
+			if label == addLabel {
+				a.doAddToPath()
+			}
+		})
+	a.pages.AddPage(pageWarnPath, modal, true, true)
+	a.app.SetFocus(modal)
+}
+
+func (a *App) doAddToPath() {
+	a.setStatus("updating PATH…")
+	go func() {
+		st, err := a.svc.AddToPath()
+		a.app.QueueUpdateDraw(func() {
+			if err != nil {
+				a.setStatus("[red]path: %s", err.Error())
+				return
+			}
+			a.setStatus("added install dir to %s — restart your shell to apply", st.ProfilePath)
+		})
+	}()
 }
 
 // --- Config screen ---

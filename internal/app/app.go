@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -72,6 +73,49 @@ func (s *Service) GetConfig() (models.Config, error) { return s.cfg.Load() }
 
 // SetConfig persists the configuration.
 func (s *Service) SetConfig(c models.Config) error { return s.cfg.Save(c) }
+
+// PathStatus reports whether the configured InstallDir is reachable on the
+// current process PATH and, when it is not, the shell profile and the exact
+// export line that would put it there. microstore never rewrites PATH on its own
+// — this only surfaces the advice (see AddToPath for the opt-in append).
+type PathStatus struct {
+	InstallDir  string // the configured managed install directory
+	OnPath      bool   // whether InstallDir is already on $PATH
+	ProfilePath string // resolved shell rc file to edit (e.g. ~/.bashrc, ~/.zshrc)
+	ExportLine  string // the line that appends InstallDir to PATH
+}
+
+// PathStatus loads the config and inspects the live environment ($PATH, $SHELL,
+// home dir) so the TUI can warn — on launch — that installed binaries won't be
+// runnable until InstallDir is on PATH.
+func (s *Service) PathStatus() (PathStatus, error) {
+	cfg, err := s.cfg.Load()
+	if err != nil {
+		return PathStatus{}, err
+	}
+	home, _ := os.UserHomeDir()
+	return PathStatus{
+		InstallDir:  cfg.InstallDir,
+		OnPath:      install.OnPath(cfg.InstallDir, os.Getenv("PATH")),
+		ProfilePath: install.ProfilePath(os.Getenv("SHELL"), home),
+		ExportLine:  install.ExportLine(cfg.InstallDir),
+	}, nil
+}
+
+// AddToPath appends the InstallDir export line to the user's shell profile so
+// installed binaries land on PATH for future shells. It is idempotent and
+// returns the status it acted on (the current process PATH is unchanged until
+// the profile is re-sourced).
+func (s *Service) AddToPath() (PathStatus, error) {
+	st, err := s.PathStatus()
+	if err != nil {
+		return PathStatus{}, err
+	}
+	if err := install.AppendExport(st.ProfilePath, st.ExportLine); err != nil {
+		return PathStatus{}, err
+	}
+	return st, nil
+}
 
 // MergeConfig overlays the provided non-empty fields onto the current config and
 // saves the result, returning it. An empty argument leaves that field unchanged

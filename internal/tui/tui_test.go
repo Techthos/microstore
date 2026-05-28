@@ -7,14 +7,14 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
-
 	"techthos.net/microstore/internal/app"
 	"techthos.net/microstore/internal/install"
 	"techthos.net/microstore/internal/models"
 )
 
 type fakeSvc struct {
-	apps []models.ManifestEntry
+	apps       []models.ManifestEntry
+	pathStatus app.PathStatus
 }
 
 func (f fakeSvc) ListCatalog(context.Context) ([]models.ManifestEntry, error) { return f.apps, nil }
@@ -25,6 +25,7 @@ func (fakeSvc) ListInstalled() ([]models.InstalledApp, error) { return nil, nil 
 func (fakeSvc) Install(context.Context, string, string, string, bool) (models.InstalledApp, error) {
 	return models.InstalledApp{}, nil
 }
+
 func (fakeSvc) Update(context.Context, string) (app.UpdateResult, error) {
 	return app.UpdateResult{}, nil
 }
@@ -38,6 +39,10 @@ func (fakeSvc) Scaffold(context.Context, string, string, string, bool) (app.Scaf
 }
 func (fakeSvc) GetConfig() (models.Config, error) { return models.Config{}, nil }
 func (fakeSvc) SetConfig(models.Config) error     { return nil }
+func (f fakeSvc) PathStatus() (app.PathStatus, error) {
+	return f.pathStatus, nil
+}
+func (fakeSvc) AddToPath() (app.PathStatus, error) { return app.PathStatus{}, nil }
 
 func TestNewBuildsPages(t *testing.T) {
 	t.Parallel()
@@ -58,6 +63,74 @@ func TestNavigationCyclesAcrossPages(t *testing.T) {
 	a.switchTo(nextPage(pageCatalog))
 	if front, _ := a.pages.GetFrontPage(); front != pageDetail {
 		t.Errorf("after Tab from catalog, front = %q, want detail", front)
+	}
+}
+
+func TestShowPathWarningAddsOverlay(t *testing.T) {
+	t.Parallel()
+	a := New(fakeSvc{})
+	a.showPathWarning(app.PathStatus{
+		InstallDir:  "/home/u/bin",
+		ProfilePath: "/home/u/.bashrc",
+		ExportLine:  `export PATH="$PATH:/home/u/bin"`,
+	})
+	if !a.pages.HasPage(pageWarnPath) {
+		t.Fatal("path-warning overlay not added")
+	}
+	if front, _ := a.pages.GetFrontPage(); front != pageWarnPath {
+		t.Errorf("front page = %q, want %q", front, pageWarnPath)
+	}
+}
+
+func TestPathWarningOnLaunchHeadless(t *testing.T) {
+	a := New(fakeSvc{
+		apps:       []models.ManifestEntry{{Repo: "o/a", Category: "tools", DisplayName: "Alpha"}},
+		pathStatus: app.PathStatus{InstallDir: "/home/u/bin", ProfilePath: "/home/u/.bashrc", ExportLine: `export PATH="$PATH:/home/u/bin"`},
+	})
+
+	sim := tcell.NewSimulationScreen("UTF-8")
+	if err := sim.Init(); err != nil {
+		t.Fatalf("sim init: %v", err)
+	}
+	sim.SetSize(120, 40)
+	a.Application().SetScreen(sim)
+
+	frames := make(chan string, 64)
+	a.Application().SetAfterDrawFunc(func(tcell.Screen) {
+		select {
+		case frames <- screenText(sim):
+		default:
+		}
+	})
+
+	done := make(chan error, 1)
+	go func() { done <- a.Run() }()
+
+	// Generous deadline: standalone this renders in ~1s, but under the full
+	// `-race` suite the event loop competes for CPU with every other package.
+	deadline := time.After(15 * time.Second)
+	for found := false; !found; {
+		select {
+		case txt := <-frames:
+			// /home/u/bin is a single unbreakable token, so it survives the
+			// modal's word-wrap (a multi-word phrase could split across rows).
+			if strings.Contains(txt, "/home/u/bin") {
+				found = true
+			}
+		case <-deadline:
+			a.Application().Stop()
+			t.Fatal("PATH warning not rendered within 15s")
+		}
+	}
+
+	a.Application().Stop()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after Stop")
 	}
 }
 

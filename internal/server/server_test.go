@@ -15,7 +15,6 @@ import (
 
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
-
 	"techthos.net/microstore/internal/app"
 	"techthos.net/microstore/internal/db"
 	"techthos.net/microstore/internal/install"
@@ -36,12 +35,15 @@ func (f *fakeGH) FetchCatalog(_ context.Context, url string) (models.Catalog, er
 	}
 	return f.catalog, nil
 }
+
 func (f *fakeGH) RepoInfo(_ context.Context, repo string) (models.RepoInfo, error) {
 	return models.RepoInfo{FullName: repo}, nil
 }
+
 func (f *fakeGH) Releases(_ context.Context, _ string) ([]models.Release, error) {
 	return f.releases, nil
 }
+
 func (f *fakeGH) LatestRelease(_ context.Context, _ string) (models.Release, error) {
 	for _, r := range f.releases {
 		if !r.Prerelease {
@@ -50,6 +52,7 @@ func (f *fakeGH) LatestRelease(_ context.Context, _ string) (models.Release, err
 	}
 	return models.Release{}, fmt.Errorf("no published release")
 }
+
 func (f *fakeGH) Download(_ context.Context, url string, w io.Writer) (int64, error) {
 	b, ok := f.blobs[url]
 	if !ok {
@@ -58,6 +61,7 @@ func (f *fakeGH) Download(_ context.Context, url string, w io.Writer) (int64, er
 	n, err := w.Write(b)
 	return int64(n), err
 }
+
 func (f *fakeGH) Tarball(_ context.Context, _, _ string) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(f.tarball)), nil
 }

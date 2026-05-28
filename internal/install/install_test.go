@@ -60,6 +60,9 @@ func TestMatchAssets(t *testing.T) {
 		{Name: "app_darwin_amd64"},
 		{Name: "app_linux_386"},
 		{Name: "checksums.txt"},
+		// A per-asset sidecar carries host os/arch tokens but must never be
+		// offered as an installable binary.
+		{Name: "app_linux_amd64.sha256"},
 	}
 	tests := []struct {
 		name   string
@@ -105,7 +108,7 @@ func TestInstallVerifiedSuccess(t *testing.T) {
 	if got.Version != "v1.0.0" || got.Repo != "techthos/microstore" || got.DisplayName != "microstore" {
 		t.Errorf("record = %+v", got)
 	}
-	wantPath := filepath.Join(dest, "microstore")
+	wantPath := filepath.Join(dest, "microapp-microstore")
 	if got.Path != wantPath {
 		t.Errorf("Path = %s, want %s", got.Path, wantPath)
 	}
@@ -115,6 +118,69 @@ func TestInstallVerifiedSuccess(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o755 {
 		t.Errorf("mode = %v, want 0755", info.Mode().Perm())
+	}
+}
+
+// TestInstallPlacedNamePrefix pins the focus contract: installed binaries land
+// under InstallDir as "microapp-<repo bare name>", with any ".exe" preserved.
+func TestInstallPlacedNamePrefix(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		repo      string
+		assetName string
+		want      string
+	}{
+		{name: "posix binary", repo: "techthos/microstore", assetName: "microstore_linux_amd64", want: "microapp-microstore"},
+		{name: "windows exe preserves suffix", repo: "acme/tool", assetName: "tool_windows_amd64.exe", want: "microapp-tool.exe"},
+		{name: "repo without owner segment", repo: "solo", assetName: "solo_linux_arm64", want: "microapp-solo"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dest := t.TempDir()
+			const url = "https://example.test/asset"
+			asset := models.Asset{Name: tc.assetName, DownloadURL: url, Size: int64(len(binBytes))}
+			rel := models.Release{TagName: "v1.0.0", Assets: []models.Asset{asset}}
+			dl := fakeDL{files: map[string][]byte{url: binBytes}}
+			ent := models.ManifestEntry{Repo: tc.repo, DisplayName: tc.repo, Category: "tools"}
+
+			// AllowUnverified isolates this test to placement, not checksums.
+			got, err := install.New(dl, dest).Install(context.Background(), ent, rel, asset, install.Options{AllowUnverified: true})
+			if err != nil {
+				t.Fatalf("Install: %v", err)
+			}
+			wantPath := filepath.Join(dest, tc.want)
+			if got.Path != wantPath {
+				t.Errorf("Path = %s, want %s", got.Path, wantPath)
+			}
+			if _, err := os.Stat(wantPath); err != nil {
+				t.Errorf("placed binary missing at %s: %v", wantPath, err)
+			}
+		})
+	}
+}
+
+// TestInstallVerifiedSidecar covers the build-and-release workflow's artifact
+// shape: a per-asset "<asset>.sha256" sidecar instead of an aggregated file.
+func TestInstallVerifiedSidecar(t *testing.T) {
+	t.Parallel()
+	dest := t.TempDir()
+	const sideURL = "https://example.test/microstore_linux_amd64.sha256"
+	asset := models.Asset{Name: "microstore_linux_amd64", DownloadURL: assetURL, Size: int64(len(binBytes))}
+	rel := models.Release{TagName: "v1.4.0", Assets: []models.Asset{
+		asset,
+		{Name: "microstore_linux_amd64.sha256", DownloadURL: sideURL},
+	}}
+	sideFile := fmt.Sprintf("%s  microstore_linux_amd64\n", sha(binBytes))
+	dl := fakeDL{files: map[string][]byte{assetURL: binBytes, sideURL: []byte(sideFile)}}
+
+	got, err := install.New(dl, dest).Install(context.Background(), entry(), rel, asset, install.Options{})
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if got.SHA256 != sha(binBytes) {
+		t.Errorf("SHA256 = %s, want %s", got.SHA256, sha(binBytes))
 	}
 }
 

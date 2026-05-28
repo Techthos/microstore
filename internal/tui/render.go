@@ -23,10 +23,65 @@ const (
 	pageConfig    = "config"
 	pageAssetPick = "assetpick"
 	pageConfirm   = "confirm"
+	pageWarnPath  = "warnpath"
 )
 
 // pageOrder is the Tab-cycle order of the primary screens.
 var pageOrder = []string{pageCatalog, pageDetail, pageInstalled, pageNew, pageConfig}
+
+// tabLabels is the human label shown for each primary page in the tab bar. The
+// 1-based position in pageOrder doubles as the quick-switch number key.
+var tabLabels = map[string]string{
+	pageCatalog:   "Catalog",
+	pageDetail:    "Detail",
+	pageInstalled: "Installed",
+	pageNew:       "New App",
+	pageConfig:    "Config",
+}
+
+// tabsText renders the top tab bar as dynamic-color markup, highlighting the
+// active page. The leading number matches the 1-5 quick-switch keys.
+func tabsText(active string) string {
+	parts := make([]string, 0, len(pageOrder))
+	for i, p := range pageOrder {
+		label := fmt.Sprintf(" %d %s ", i+1, tabLabels[p])
+		if p == active {
+			parts = append(parts, "[black:aqua:b]"+label+"[-:-:-]")
+		} else {
+			parts = append(parts, "[aqua]"+label+"[-]")
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// hintFor returns the context-sensitive keybinding hints for a page, shown in
+// the footer hint bar so every shortcut is discoverable on screen.
+func hintFor(page string) string {
+	const global = "[::b]1-5[::-]/[::b]Tab[::-] switch  [::b]q[::-] quit"
+	switch page {
+	case pageCatalog:
+		return "[::b]↑↓[::-] move  [::b]Enter[::-] details  [::b]/[::-] search  " + global
+	case pageDetail:
+		return "[::b]i[::-] install  [::b]Esc[::-] back  " + global
+	case pageInstalled:
+		return "[::b]u[::-] update  [::b]x[::-] uninstall  [::b]v[::-] verify  " + global
+	case pageNew:
+		return "[::b]↑↓[::-] fields  [::b]Enter[::-] scaffold  " + global
+	case pageConfig:
+		return "[::b]↑↓[::-] fields  [::b]Enter[::-] save  " + global
+	}
+	return global
+}
+
+// pathWarningText renders the launch-time warning shown when InstallDir is not
+// on $PATH: it names the directory, explains why installed binaries won't run,
+// and shows the exact export line plus the profile it can be added to.
+func pathWarningText(st app.PathStatus) string {
+	return fmt.Sprintf(
+		"Install dir is not on your PATH:\n\n  %s\n\nInstalled apps won't be runnable from your shell until it is.\n"+
+			"Add this line to %s?\n\n  %s",
+		st.InstallDir, st.ProfilePath, st.ExportLine)
+}
 
 func nextPage(cur string) string { return cyclePage(cur, +1) }
 func prevPage(cur string) string { return cyclePage(cur, -1) }
