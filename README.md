@@ -1,11 +1,20 @@
 # microstore
 
-A single-binary local store for Go micro-apps: browse a GitHub-hosted catalog, install the right
-release binary for your machine (with SHA-256 verification), manage what you've installed, and
-scaffold new micro-apps from templates. It exposes the same domain through both a **tview TUI** and
-an **MCP stdio server**, backed by an embedded **bbolt** database.
+**microstore** is a single-binary, local "app store" for Go micro-apps. It browses a GitHub-hosted
+catalog, installs the right release binary for your OS/architecture with SHA-256 verification, and
+tracks, updates, re-verifies, and uninstalls what you've installed — plus scaffolds new micro-apps
+from templates and can drop an embedded Claude Code starter kit into any directory
+(`microstore init`).
 
-See [`docs/SPECIFICATIONS.md`](docs/SPECIFICATIONS.md) for the full product contract.
+One shared domain, three faces:
+
+- a **tview terminal UI** for interactive browsing and management,
+- an **MCP stdio server** so LLM clients can drive the same use-cases,
+- an **embedded bbolt database** — no server, no cgo, just one local data file.
+
+microstore is online-only — the catalog is always fetched live; only your installs and the app's
+own config are persisted. See [`docs/SPECIFICATIONS.md`](docs/SPECIFICATIONS.md) for the full
+product contract.
 
 ## Install
 
@@ -72,3 +81,7 @@ models  ←  db  ←  server
 `internal/models` is storage-agnostic; `internal/db` is the only package that touches bbolt; both
 `internal/server` (MCP) and `internal/tui` go through `internal/db`. See `CLAUDE.md` and
 `.claude/rules/` for the layer rules.
+
+---
+
+Built and maintained by [Techthos](https://www.techthos.net).
