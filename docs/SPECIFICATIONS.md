@@ -21,7 +21,11 @@ shape.
   directory, and track it. Update / uninstall / re-verify tracked installs.
 - **Create** — pick a starting template (also listed in the catalog), download its tarball from
   GitHub, extract the bare scaffolding into a target directory, and hand off to the existing
-  spec-driven workflow by initiating `/product-idea`.
+  spec-driven workflow by initiating `/product-idea`. Independently of the catalog, `microstore init`
+  places the **embedded Claude Code bootstrap kit** (the `.claude/` directory: the `/product-idea`,
+  `/app-init`, and `/app-spec-sync` commands, the layer rules, and the `build-and-release` skill)
+  into the current directory and prints how the phases are used — it needs no network and opens no
+  database.
 
 It is **online-only**: there is no offline catalog cache. The embedded bbolt file persists only what
 you've installed and the app's own configuration.
@@ -35,6 +39,9 @@ you've installed and the app's own configuration.
   managed directory; record the install.
 - Manage tracked installs: **update** to a newer release, **uninstall**, and **re-verify** integrity.
 - Scaffold a new micro-app from a catalog-listed template and **initiate `/product-idea`**.
+- Bootstrap the spec-first Claude Code setup anywhere via **`microstore init`**: place the embedded
+  `.claude` kit into the current directory and print the phase guide
+  (`/product-idea` → `/app-init` → `/app-spec-sync`).
 - Expose all of the above through both a **tview TUI** and an **MCP stdio server** (full read+mutate).
 - Use anonymous GitHub access by default; use a token from `MICROSTORE_GITHUB_TOKEN` when present.
 
@@ -339,6 +346,12 @@ When `InstallDir` is already on `$PATH`, no modal appears.
   rejected). A non-empty target is refused unless `force`. After extraction, `/product-idea` is
   initiated (TUI launches `claude`, or prints the exact command if unavailable; MCP returns the
   next-step instruction). The module path is **not** modified and `git init` is **not** run.
+- **`init` mode:** In a directory with no `.claude` entry, `microstore init` places the embedded
+  bootstrap kit byte-for-byte (`.claude/commands`, `.claude/rules`, `.claude/skills`) and prints the
+  phase guide naming `/product-idea`, `/app-init`, and `/app-spec-sync` in that order plus the
+  `build-and-release` skill. When `.claude` already exists (file or directory), init refuses with a
+  clear error and writes nothing. The mode never opens the database, performs no network I/O, and
+  ignores `--db`. The kit is embedded from `templates/claude-code/` at build time.
 - **PATH check (TUI launch):** When `InstallDir` is absent from `$PATH`, launching the TUI raises a
   modal showing the exact `export PATH="$PATH:<InstallDir>"` line and the target shell profile
   (`~/.zshrc` for zsh, else `~/.bashrc`). Confirming appends that line to the profile (idempotently;
@@ -351,10 +364,11 @@ When `InstallDir` is already on `$PATH`, no modal appears.
 
 ## Open Questions / Assumptions
 
-- **Modes & lock.** Default invocation → TUI; `serve`/`mcp` → MCP stdio server; `--db <path>` overrides
-  the DB location (default `~/.local/share/microstore/microstore.db`). Because bbolt takes a
-  process-wide write lock, the TUI and the MCP server are **alternative modes**, not concurrent
-  against one file. *Assumption accepted.*
+- **Modes & lock.** Default invocation → TUI; `serve`/`mcp` → MCP stdio server; `init` → place the
+  embedded Claude Code bootstrap kit into the current directory and exit (no DB, no network);
+  `--db <path>` overrides the DB location (default `~/.local/share/microstore/microstore.db`).
+  Because bbolt takes a process-wide write lock, the TUI and the MCP server are **alternative
+  modes**, not concurrent against one file. *Assumption accepted.*
 - **GitHub auth.** Anonymous by default (60 req/hr). If `MICROSTORE_GITHUB_TOKEN` is set, requests use
   it (`Authorization: Bearer …`, 5000 req/hr, private repos). On HTTP 403 rate-limit, the error
   surfaces the limit/reset. *Assumption accepted.*

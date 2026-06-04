@@ -3,9 +3,10 @@
 // stdio server. main stays thin and calls Run.
 //
 // Modes: default (or "tui") launches the terminal UI; "serve"/"mcp" runs the MCP
-// stdio server. A shared --db flag overrides the database location. Because
-// bbolt takes a process-wide write lock, the modes are alternatives, not
-// concurrent against one file.
+// stdio server; "init" places the embedded Claude Code bootstrap kit (.claude)
+// into the current directory and touches no database. A shared --db flag
+// overrides the database location. Because bbolt takes a process-wide write
+// lock, the modes are alternatives, not concurrent against one file.
 package cmd
 
 import (
@@ -41,9 +42,19 @@ func Run(args []string) error {
 		return err
 	}
 	switch opt.mode {
-	case "", "tui", "serve", "mcp":
+	case "", "tui", "serve", "mcp", "init":
 	default:
-		return fmt.Errorf("unknown mode %q (use \"\", \"tui\", \"serve\", or \"mcp\")", opt.mode)
+		return fmt.Errorf("unknown mode %q (use \"\", \"tui\", \"serve\", \"mcp\", or \"init\")", opt.mode)
+	}
+
+	// init writes the bootstrap kit into the working directory and never
+	// touches the database, so it dispatches before the store opens.
+	if opt.mode == "init" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("determine working directory: %w", err)
+		}
+		return runInit(wd, os.Stdout)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(opt.dbPath), 0o755); err != nil {

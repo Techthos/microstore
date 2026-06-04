@@ -28,7 +28,9 @@ not this file, are the source of truth for their layer.
 One binary, multiple **modes** selected in `cmd/`, all backed by the same bbolt file:
 
 - default / `tui` → launches the terminal UI;
-- `serve` / `mcp` → runs the MCP stdio server.
+- `serve` / `mcp` → runs the MCP stdio server;
+- `init` → places the embedded Claude Code bootstrap kit (`.claude/` from `templates/claude-code/`)
+  into the current directory and prints the phase guide — opens no DB, needs no network.
 
 The mode may lead (`microstore serve --db x`) or follow the flags (`microstore --db x serve`).
 `--db <path>` overrides the DB location (default `~/.local/share/microstore/microstore.db`).
@@ -47,7 +49,12 @@ internal/
   app/                # USE-CASE LAYER: orchestrates github+db+install+scaffold into UC 1–12
   server/             # MCP server (tools.go/resources.go); delegates to app.Service
   tui/                # tview view layer; owns the one *tview.Application; delegates to app.Service
+templates/            # go:embed'ed project templates; claude-code/ is the .claude kit `init` places
 ```
+
+`templates/claude-code/.claude/` is a **copy** of this repo's live `.claude` (commands, rules,
+skills) frozen into the binary. When the live `.claude` content changes, refresh the copy in the
+same commit — the two must not drift.
 
 ## The dependency rule (the thing that's easy to get wrong)
 
