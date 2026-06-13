@@ -1,0 +1,110 @@
+name: Build and Release
+
+# CI on push/PR lives in ci.yml; this workflow only handles version tags:
+# re-run the tests as a release gate, cross-compile in a matrix, then publish
+# all binaries from a single job (a per-matrix-job release creation races —
+# every leg tries to create the release for the tag at once).
+on:
+  push:
+    tags: ['v*']
+
+# Least privilege by default; the release job elevates locally.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run tests
+        run: go test -race -v ./...
+
+      - name: Build
+        run: go build -v .
+
+  build:
+    name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+        exclude:
+          - goos: windows
+            goarch: arm64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          BINARY_NAME="microapp-[NAME-PLEASE-PLACE]-${VERSION}-${GOOS}-${GOARCH}"
+          [ "${GOOS}" = "windows" ] && BINARY_NAME="${BINARY_NAME}.exe"
+          go build -trimpath -ldflags="-s -w" -o "${BINARY_NAME}" .
+          sha256sum "${BINARY_NAME}" > "${BINARY_NAME}.sha256"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: microapp-[NAME-PLEASE-PLACE]-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: microapp-[NAME-PLEASE-PLACE]-*
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write   # required to create the release / upload assets
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
+        with:
+          files: dist/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true
