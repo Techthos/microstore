@@ -25,6 +25,7 @@ type Service interface {
 	Update(ctx context.Context, repo string) (app.UpdateResult, error)
 	Uninstall(repo string) error
 	Verify(repo string) (install.VerifyStatus, error)
+	RunInstalled(repo string) (string, error)
 	ListTemplates(ctx context.Context) ([]models.Template, error)
 	Scaffold(ctx context.Context, templateRepo, targetDir, ref string, force bool) (app.ScaffoldResult, error)
 	GetConfig() (models.Config, error)
@@ -344,6 +345,12 @@ func (a *App) showAssetPick(repo string, assets []models.Asset) {
 func (a *App) buildInstalled() {
 	a.installed = tview.NewTable().SetSelectable(true, false).SetFixed(1, 0)
 	a.installed.SetSelectedStyle(selectedStyle())
+	// Enter "opens" the installed app by handing it the terminal (UC 13).
+	a.installed.SetSelectedFunc(func(row, _ int) {
+		if row >= 1 && row-1 < len(a.installedApps) {
+			a.runInstalled(a.installedApps[row-1].Repo)
+		}
+	})
 	a.installed.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		if ev.Key() != tcell.KeyRune {
 			return ev
@@ -370,7 +377,7 @@ func (a *App) buildInstalled() {
 
 func (a *App) installedPage() tview.Primitive {
 	wrap := tview.NewFlex().SetDirection(tview.FlexRow).AddItem(a.installed, 0, 1, true)
-	wrap.SetBorder(true).SetTitle(" Installed ([u] update · [x] uninstall · [v] verify) ")
+	wrap.SetBorder(true).SetTitle(" Installed ([Enter] run · [u] update · [x] uninstall · [v] verify) ")
 	return wrap
 }
 
@@ -461,6 +468,28 @@ func (a *App) doVerify(repo string) {
 			a.renderInstalled()
 			a.setStatus("%s: %s", repo, string(st))
 		})
+	}()
+}
+
+// runInstalled hands the terminal to an installed micro-app's binary via
+// app.Suspend — the same handoff used for /product-idea — then restores the TUI
+// when the child exits. Resolving (and validating) the path stays in the Service;
+// spawning the process is a view concern, so it lives here. The Suspend call runs
+// in a goroutine (off the event loop) so resolving the path never blocks the loop.
+func (a *App) runInstalled(repo string) {
+	a.setStatus("launching %s…", repo)
+	go func() {
+		path, err := a.svc.RunInstalled(repo)
+		if err != nil {
+			a.app.QueueUpdateDraw(func() { a.setStatus("[red]run: %s", err.Error()) })
+			return
+		}
+		a.app.Suspend(func() {
+			cmd := exec.Command(path)
+			cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+			_ = cmd.Run()
+		})
+		a.app.QueueUpdateDraw(func() { a.setStatus("%s exited — back in microstore", repo) })
 	}()
 }
 

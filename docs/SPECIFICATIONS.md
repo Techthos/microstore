@@ -194,10 +194,19 @@ Each use-case names the entities, the surface(s), and the repository/service ope
     absent); the MCP tool returns the next-step instruction for the connected LLM client. Scaffolding
     does **not** set the module path, run `git init`, or rename. *Ops:* GitHub tarball fetch +
     scaffolder; no bbolt.
+13. **Run an installed app (launch sub-micro-app).** *Entities:* `InstalledApp`. *Surface:* **TUI
+    only** — running a full-screen sub-app requires owning the terminal, which the stdio MCP server
+    (whose stdout *is* the protocol channel) cannot do, so there is no MCP tool. From the Installed
+    screen, `Enter` resolves the highlighted install to its recorded binary `Path`, suspends the TUI
+    via `app.Suspend` (the same terminal handoff used for `/product-idea`), and runs the binary with
+    inherited stdin/stdout/stderr; when the child exits, the TUI is restored. The path is validated
+    before launch — a record whose binary is missing or is a directory yields a clear status error
+    and launches nothing. *Ops:* `InstallRepo.Get` + `os.Stat` (path resolution); the process exec
+    lives in the view layer. No network, no bbolt write.
 
 ## User Stories
 
-**Consuming (TUI) — UC 2–10**
+**Consuming (TUI) — UC 2–10, 13**
 - As an operator, I want to browse the catalog of available micro-apps so I can see what exists. *(UC 2)*
 - As an operator, I want to search/filter by name and category so I can find an app quickly. *(UC 3)*
 - As an operator, I want to open an app and read its description, releases, and assets so I can decide
@@ -205,6 +214,8 @@ Each use-case names the entities, the surface(s), and the repository/service ope
 - As an operator, I want to install an app with one keystroke and have the correct binary for my
   machine fetched and integrity-checked so I don't pick the wrong asset or a corrupted file. *(UC 6)*
 - As an operator, I want to see what I've installed, update it, uninstall it, or re-verify it. *(UC 7–10)*
+- As an operator, I want to launch an installed micro-app from inside microstore so I can run it
+  without leaving the store and find it again when it exits. *(UC 13)*
 
 **Creating (TUI) — UC 11–12**
 - As a developer, I want to pick a starting template and scaffold a new project into a directory, then
@@ -261,6 +272,11 @@ None in v1 (see Open Questions).
 > perform network downloads and filesystem writes (including `chmod` and tarball extraction). Path
 > inputs (`target_dir`, install dir) are cleaned and confined; tarball entries are checked against
 > path traversal before extraction.
+>
+> **No `run_app` tool (UC 13 is TUI-only).** Launching an installed micro-app means handing it the
+> controlling terminal — which the stdio MCP server cannot do, since its stdout *is* the protocol
+> channel. UC 13 is therefore exposed only on the TUI's Installed screen and has no MCP tool or
+> resource.
 
 ## TUI Surface
 
@@ -280,7 +296,8 @@ Five screens stacked in `Pages`; a persistent status bar shows progress/errors.
 [2] Detail         RepoInfo + releases + latest assets + install state.
    │                Keys: [i] install, [Esc] back. Ambiguous/no asset match ⇒ asset-pick list.
 [3] Installed      Table (Repo, Version, InstalledAt, last verify state).
-   │                Keys: [u] update, [x] uninstall (Modal confirm), [v] verify.
+   │                Keys: [Enter] run (app.Suspend → exec the binary), [u] update,
+   │                [x] uninstall (Modal confirm), [v] verify.
 [4] New App        Form: choose Template (from manifest), Target dir (InputField).
    │                [Enter] scaffold ⇒ extract ⇒ app.Suspend → launch `claude /product-idea`
    │                (or print the command if `claude` is absent).
@@ -303,7 +320,9 @@ When `InstallDir` is already on `$PATH`, no modal appears.
 - **Catalog:** `/` focuses the search field; selecting a category filters; `Enter` opens Detail.
 - **Detail:** `i` installs (auto-match → verify → download; on ambiguity, a selectable asset list
   appears); `Esc` returns to Catalog.
-- **Installed:** `u` update, `x` uninstall (confirm via `Modal`), `v` re-verify; results update the row.
+- **Installed:** `Enter` runs the highlighted app (suspends the TUI and execs its binary, restoring
+  the TUI when it exits); `u` update, `x` uninstall (confirm via `Modal`), `v` re-verify; results
+  update the row.
 - **New App:** a `Form` (template dropdown + target-dir input); submit scaffolds, then suspends the UI
   to hand off to `/product-idea`.
 - **Config:** a `Form` (manifest-URL + install-dir inputs) pre-filled from the stored config; `Save`
@@ -349,6 +368,14 @@ When `InstallDir` is already on `$PATH`, no modal appears.
   rejected). A non-empty target is refused unless `force`. After extraction, `/product-idea` is
   initiated (TUI launches `claude`, or prints the exact command if unavailable; MCP returns the
   next-step instruction). The module path is **not** modified and `git init` is **not** run.
+- **UC 13 — Run installed app (TUI only):** `RunInstalled(repo)` returns the recorded absolute `Path`
+  for a tracked install whose binary exists as a regular file. An unknown slug yields a clear "not
+  installed" error; a record whose binary is missing or is a directory yields an error naming the
+  path — in every error case nothing is executed. On the Installed screen, `Enter` resolves the
+  highlighted row through `RunInstalled`, then suspends the TUI (`app.Suspend`) and runs the binary
+  with inherited stdin/stdout/stderr; when the child exits the TUI is restored and the status bar
+  reports the return. No MCP tool exposes this (the stdio server cannot own a terminal). No bbolt
+  write occurs.
 - **`init` mode:** In a directory with no `.claude` entry, `microstore init` places the embedded
   bootstrap kit byte-for-byte (`.claude/commands`, `.claude/rules`, `.claude/skills`) and prints the
   phase guide naming `/product-idea`, `/app-init`, and `/app-spec-sync` in that order plus the

@@ -33,6 +33,7 @@ func (fakeSvc) Uninstall(string) error { return nil }
 func (fakeSvc) Verify(string) (install.VerifyStatus, error) {
 	return install.VerifyOK, nil
 }
+func (fakeSvc) RunInstalled(string) (string, error)                      { return "", nil }
 func (fakeSvc) ListTemplates(context.Context) ([]models.Template, error) { return nil, nil }
 func (fakeSvc) Scaffold(context.Context, string, string, string, bool) (app.ScaffoldResult, error) {
 	return app.ScaffoldResult{}, nil

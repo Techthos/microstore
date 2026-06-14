@@ -312,6 +312,32 @@ func (s *Service) Verify(repo string) (install.VerifyStatus, error) {
 	return install.Verify(existing.Path, existing.SHA256)
 }
 
+// --- UC 13: run an installed app ---
+
+// RunInstalled resolves a tracked install to its on-disk binary path so a caller
+// can hand the terminal to it. It does not execute the binary — process handoff
+// (e.g. the TUI's app.Suspend) is the view layer's concern — but it guarantees
+// the recorded path exists and is a regular file, returning a clear error
+// otherwise, so a stale record whose binary was deleted out-of-band fails loudly
+// rather than spawning nothing.
+func (s *Service) RunInstalled(repo string) (string, error) {
+	existing, err := s.installs.Get(repo)
+	if errors.Is(err, db.ErrNotFound) {
+		return "", fmt.Errorf("%s is not installed", repo)
+	}
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(existing.Path)
+	if err != nil {
+		return "", fmt.Errorf("%s binary missing at %s: %w", repo, existing.Path, err)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("%s path is a directory, not a binary: %s", repo, existing.Path)
+	}
+	return existing.Path, nil
+}
+
 // --- UC 11 / 12: templates & scaffold ---
 
 // ListTemplates returns the manifest's templates section, fetched live.

@@ -68,7 +68,7 @@ func hintFor(page string) string {
 	case pageDetail:
 		return k("i") + " install  " + k("Esc") + " back  " + global
 	case pageInstalled:
-		return k("u") + " update  " + k("x") + " uninstall  " + k("v") + " verify  " + global
+		return k("Enter") + " run  " + k("u") + " update  " + k("x") + " uninstall  " + k("v") + " verify  " + global
 	case pageNew:
 		return k("↑↓") + " fields  " + k("Enter") + " scaffold  " + global
 	case pageConfig:
