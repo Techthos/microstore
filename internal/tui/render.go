@@ -96,7 +96,7 @@ func statusHints(section string) string {
 		return k("↑↓") + " move  " + k("Enter") + " detail  " + k("i") + " install  " +
 			k("/") + " filter  " + k("r") + " refresh  " + help
 	case pageInstalled:
-		return k("↑↓") + " move  " + k("u") + " update  " + k("d") + " uninstall  " +
+		return k("↑↓") + " move  " + k("Enter") + " run  " + k("u") + " update  " + k("d") + " uninstall  " +
 			k("v") + " verify  " + k("Space") + " select  " + k("/") + " filter  " + help
 	case pageNew:
 		return k("↑↓") + " fields  " + k("Ctrl-S") + " scaffold  " + k("Esc") + " cancel  " + help
@@ -111,7 +111,7 @@ func helpText() string {
 	rows := [][2]string{
 		{"1–4", "jump to section"},
 		{"↑ ↓ / j k", "move selection"},
-		{"Enter", "open / confirm"},
+		{"Enter", "open / confirm · run (Installed)"},
 		{"Esc", "back / cancel"},
 		{"Tab / Shift-Tab", "cycle focus"},
 		{"Ctrl-B", "toggle sidebar"},

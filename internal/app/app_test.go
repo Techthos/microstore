@@ -460,6 +460,43 @@ func TestVerify(t *testing.T) {
 	}
 }
 
+func TestRunInstalled(t *testing.T) {
+	t.Parallel()
+	bin := []byte("bin")
+	rel, blobs := verifiedRelease("v1.0.0", bin)
+	gh := &fakeGH{releases: []models.Release{rel}, blobs: blobs}
+	svc, _ := configured(t, gh)
+	ctx := context.Background()
+
+	rec, err := svc.Install(ctx, "o/app", "", "", false)
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	// Installed: resolves to the placed binary's absolute path.
+	path, err := svc.RunInstalled("o/app")
+	if err != nil {
+		t.Fatalf("RunInstalled: %v", err)
+	}
+	if path != rec.Path {
+		t.Errorf("RunInstalled path = %q, want %q", path, rec.Path)
+	}
+
+	// Not installed: a clear "not installed" error, no path.
+	if _, err := svc.RunInstalled("o/missing"); err == nil || !strings.Contains(err.Error(), "not installed") {
+		t.Errorf("RunInstalled(unknown) err = %v, want \"not installed\"", err)
+	}
+
+	// Stale record (binary deleted out-of-band): fails loudly rather than
+	// returning a path to nothing.
+	if err := os.Remove(rec.Path); err != nil {
+		t.Fatalf("remove binary: %v", err)
+	}
+	if _, err := svc.RunInstalled("o/app"); err == nil || !strings.Contains(err.Error(), "missing") {
+		t.Errorf("RunInstalled(deleted) err = %v, want \"missing\"", err)
+	}
+}
+
 func TestAppDetails(t *testing.T) {
 	t.Parallel()
 	gh := &fakeGH{

@@ -35,6 +35,7 @@ type Service interface {
 	Update(ctx context.Context, repo string) (app.UpdateResult, error)
 	Uninstall(repo string) error
 	Verify(repo string) (install.VerifyStatus, error)
+	RunInstalled(repo string) (string, error)
 	ListTemplates(ctx context.Context) ([]models.Template, error)
 	Scaffold(ctx context.Context, templateRepo, targetDir, ref string, force bool) (app.ScaffoldResult, error)
 	GetConfig() (models.Config, error)
@@ -632,7 +633,14 @@ func (a *App) buildInstalled() {
 		a.showInstalledDetail(row)
 		a.updateContext()
 	})
-	a.installed.SetSelectedFunc(func(int, int) { a.app.SetFocus(a.installedDetail) })
+	// Enter runs the highlighted installed app (UC 13): for an installed item the
+	// natural "open" is to launch it. The detail pane auto-shows on selection and
+	// stays reachable via Tab, so Enter is free to hand over the terminal.
+	a.installed.SetSelectedFunc(func(row, _ int) {
+		if ia, ok := a.installedAt(row); ok {
+			a.runInstalled(ia.Repo)
+		}
+	})
 	a.installed.SetInputCapture(a.installedKeys)
 
 	a.installedDetail = tview.NewTextView().SetDynamicColors(true).SetWrap(true)
@@ -918,6 +926,28 @@ func (a *App) doVerify(repo string) {
 func (a *App) currentInstalledRow() int {
 	row, _ := a.installed.GetSelection()
 	return row
+}
+
+// runInstalled hands the terminal to an installed micro-app's binary via
+// app.Suspend — the same handoff used for /product-idea — then restores the TUI
+// when the child exits. Resolving (and validating) the path stays in the Service;
+// spawning the process is a view concern, so it lives here. The Suspend call runs
+// in a goroutine (off the event loop) so resolving the path never blocks the loop.
+func (a *App) runInstalled(repo string) {
+	a.setStatus("launching %s…", repo)
+	go func() {
+		path, err := a.svc.RunInstalled(repo)
+		if err != nil {
+			a.app.QueueUpdateDraw(func() { a.setStatus("[red]run: %s", err.Error()) })
+			return
+		}
+		a.app.Suspend(func() {
+			cmd := exec.Command(path)
+			cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+			_ = cmd.Run()
+		})
+		a.app.QueueUpdateDraw(func() { a.setStatus("%s exited — back in microstore", repo) })
+	}()
 }
 
 // --- New App screen ---
