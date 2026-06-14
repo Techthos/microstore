@@ -74,7 +74,7 @@ jobs:
           CGO_ENABLED: '0'
           VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
-          BINARY_NAME="microstore-${VERSION}-${GOOS}-${GOARCH}"
+          BINARY_NAME="microapp-[NAME-PLEASE-PLACE]-${VERSION}-${GOOS}-${GOARCH}"
           [ "${GOOS}" = "windows" ] && BINARY_NAME="${BINARY_NAME}.exe"
           go build -trimpath -ldflags="-s -w" -o "${BINARY_NAME}" .
           sha256sum "${BINARY_NAME}" > "${BINARY_NAME}.sha256"
@@ -82,8 +82,8 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:
-          name: microstore-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: microstore-*
+          name: microapp-[NAME-PLEASE-PLACE]-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: microapp-[NAME-PLEASE-PLACE]-*
           if-no-files-found: error
           retention-days: 1
 

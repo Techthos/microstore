@@ -73,8 +73,9 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: '0'
           VERSION: ${{ steps.version.outputs.VERSION }}
+          REPO_NAME: ${{ github.event.repository.name }}
         run: |
-          BINARY_NAME="microapp-[NAME-PLEASE-PLACE]-${VERSION}-${GOOS}-${GOARCH}"
+          BINARY_NAME="${REPO_NAME}-${VERSION}-${GOOS}-${GOARCH}"
           [ "${GOOS}" = "windows" ] && BINARY_NAME="${BINARY_NAME}.exe"
           go build -trimpath -ldflags="-s -w" -o "${BINARY_NAME}" .
           sha256sum "${BINARY_NAME}" > "${BINARY_NAME}.sha256"
@@ -82,8 +83,8 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:
-          name: microapp-[NAME-PLEASE-PLACE]-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: microapp-[NAME-PLEASE-PLACE]-*
+          name: ${{ github.event.repository.name }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ${{ github.event.repository.name }}-*
           if-no-files-found: error
           retention-days: 1
 
