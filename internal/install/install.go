@@ -248,7 +248,9 @@ func parseChecksums(data []byte) map[string]string {
 // placedName is the filename an installed binary takes under InstallDir: the
 // manifest entry's Bin override when set, otherwise the repo's bare name (the
 // segment after "owner/"), prefixed with "microapp-" either way, so every
-// installed micro-app is recognisable and grouped on a shared PATH. A ".exe"
+// installed micro-app is recognisable and grouped on a shared PATH. The prefix
+// is only added when absent: catalog entries that already ship as "microapp-xy"
+// stay "microapp-xy" rather than doubling up to "microapp-microapp-xy". A ".exe"
 // suffix is preserved for Windows assets.
 func placedName(entry models.ManifestEntry, assetName string) string {
 	name := entry.Bin
@@ -258,7 +260,9 @@ func placedName(entry models.ManifestEntry, assetName string) string {
 			name = name[i+1:]
 		}
 	}
-	name = "microapp-" + name
+	if !strings.HasPrefix(name, "microapp-") {
+		name = "microapp-" + name
+	}
 	if strings.HasSuffix(strings.ToLower(assetName), ".exe") && !strings.HasSuffix(strings.ToLower(name), ".exe") {
 		name += ".exe"
 	}

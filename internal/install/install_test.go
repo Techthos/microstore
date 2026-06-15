@@ -138,6 +138,8 @@ func TestInstallPlacedNamePrefix(t *testing.T) {
 		{name: "repo without owner segment", repo: "solo", assetName: "solo_linux_arm64", want: "microapp-solo"},
 		{name: "bin override replaces bare name", repo: "techthos/microstore", bin: "store", assetName: "microstore_linux_amd64", want: "microapp-store"},
 		{name: "bin override keeps exe suffix", repo: "acme/tool", bin: "kit", assetName: "tool_windows_amd64.exe", want: "microapp-kit.exe"},
+		{name: "repo already prefixed is not doubled", repo: "acme/microapp-xy", assetName: "microapp-xy_linux_amd64", want: "microapp-xy"},
+		{name: "bin override already prefixed is not doubled", repo: "acme/tool", bin: "microapp-kit", assetName: "tool_linux_amd64", want: "microapp-kit"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

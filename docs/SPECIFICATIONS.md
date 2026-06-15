@@ -174,7 +174,8 @@ Each use-case names the entities, the surface(s), and the repository/service ope
    target release (default: latest non-prerelease, or a specified tag), detect host `GOOS/GOARCH`,
    match an asset by naming convention, fetch the release's `checksums.txt`, download the asset,
    **verify SHA-256**, write it to `InstallDir` as `microapp-<name>` (the entry's `bin` override when
-   set, else the repo's bare name, prefixed;
+   set, else the repo's bare name, prefixed — the `microapp-` prefix is added only when absent, so a
+   name that already begins with `microapp-` is left as-is rather than doubled to `microapp-microapp-…`;
    any `.exe` suffix preserved on Windows) with `0755`, and record an `InstalledApp`. On zero or
    ambiguous asset matches, fall back to manual asset selection. If no checksums file is found,
    installation is **refused** unless an explicit "allow unverified" override is given. *Ops:* GitHub
@@ -412,7 +413,8 @@ lists, `Ctrl`-chords in forms):
   "latest" resolution.
 - **UC 6 — Install:** On a host where exactly one asset matches `GOOS/GOARCH`, microstore downloads it,
   the computed SHA-256 equals the `checksums.txt` entry, the file lands in `InstallDir` named
-  `microapp-<name>` (the entry's `bin` override when set, else the repo's bare name, prefixed) mode
+  `microapp-<name>` (the entry's `bin` override when set, else the repo's bare name, prefixed only
+  when the name does not already start with `microapp-`) mode
   `0755`, and an `InstalledApp` record exists
   keyed by slug with its `Path` pointing at that file. A checksum mismatch aborts the install, writes no
   record, and leaves no partial binary. Zero/ambiguous matches trigger manual selection (TUI) or an
