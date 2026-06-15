@@ -97,7 +97,7 @@ func statusHints(section string) string {
 			k("/") + " filter  " + k("r") + " refresh  " + help
 	case pageInstalled:
 		return k("↑↓") + " move  " + k("Enter") + " run  " + k("u") + " update  " + k("d") + " uninstall  " +
-			k("v") + " verify  " + k("Space") + " select  " + k("/") + " filter  " + help
+			k("v") + " verify  " + k("m") + " mcp  " + k("Space") + " select  " + k("/") + " filter  " + help
 	case pageNew:
 		return k("↑↓") + " fields  " + k("Ctrl-S") + " scaffold  " + k("Esc") + " cancel  " + help
 	case pageConfig:
@@ -120,6 +120,7 @@ func helpText() string {
 		{"u", "update (Installed)"},
 		{"d", "uninstall (Installed)"},
 		{"v", "verify (Installed)"},
+		{"m", "add to .mcp.json (Installed)"},
 		{"r", "refresh list"},
 		{"Space", "toggle row select"},
 		{"Ctrl-S", "save (forms)"},

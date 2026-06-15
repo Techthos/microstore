@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -495,6 +496,130 @@ func TestRunInstalled(t *testing.T) {
 	if _, err := svc.RunInstalled("o/app"); err == nil || !strings.Contains(err.Error(), "missing") {
 		t.Errorf("RunInstalled(deleted) err = %v, want \"missing\"", err)
 	}
+}
+
+func TestConfigureMCP(t *testing.T) {
+	t.Parallel()
+	rel, blobs := verifiedRelease("v1.0.0", []byte("bin"))
+	gh := &fakeGH{
+		catalog: models.Catalog{Apps: []models.ManifestEntry{{
+			Repo: "o/app", Category: "tools", DisplayName: "My App",
+			MCP: &models.MCPLaunch{Command: "microapp-app", Args: []string{"mcp"}},
+		}}},
+		releases: []models.Release{rel},
+		blobs:    blobs,
+	}
+	svc, _ := configured(t, gh)
+	ctx := context.Background()
+	if _, err := svc.Install(ctx, "o/app", "", "", false); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".mcp.json")
+
+	// Create: no .mcp.json yet — the server key derives from the display name.
+	res, err := svc.ConfigureMCP("o/app", dir)
+	if err != nil {
+		t.Fatalf("ConfigureMCP create: %v", err)
+	}
+	if !res.Created || res.Updated || res.Server != "my-app" || res.Path != path {
+		t.Fatalf("create result = %+v, want Created server \"my-app\" at %q", res, path)
+	}
+	servers := readMCPServers(t, path)
+	if got := servers["my-app"]; got.Command != "microapp-app" || len(got.Args) != 1 || got.Args[0] != "mcp" {
+		t.Errorf("my-app entry = %+v, want command microapp-app args [mcp]", got)
+	}
+
+	// Edit: a second call replaces the entry in place (no duplicate) and reports Updated.
+	res2, err := svc.ConfigureMCP("o/app", dir)
+	if err != nil {
+		t.Fatalf("ConfigureMCP update: %v", err)
+	}
+	if res2.Created || !res2.Updated {
+		t.Errorf("update result = %+v, want Updated (not Created)", res2)
+	}
+}
+
+// TestConfigureMCPPreservesExisting pins that editing an existing .mcp.json keeps
+// every unrelated server entry and top-level key intact.
+func TestConfigureMCPPreservesExisting(t *testing.T) {
+	t.Parallel()
+	rel, blobs := verifiedRelease("v1.0.0", []byte("bin"))
+	gh := &fakeGH{
+		catalog: models.Catalog{Apps: []models.ManifestEntry{{
+			Repo: "o/app", DisplayName: "App",
+			MCP: &models.MCPLaunch{Command: "microapp-app", Args: []string{"mcp"}},
+		}}},
+		releases: []models.Release{rel},
+		blobs:    blobs,
+	}
+	svc, _ := configured(t, gh)
+	if _, err := svc.Install(context.Background(), "o/app", "", "", false); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".mcp.json")
+	seed := `{"mcpServers":{"other":{"command":"keepme"}},"$schema":"https://example/schema"}`
+	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if _, err := svc.ConfigureMCP("o/app", dir); err != nil {
+		t.Fatalf("ConfigureMCP: %v", err)
+	}
+	var doc map[string]json.RawMessage
+	raw, _ := os.ReadFile(path)
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("reparse: %v", err)
+	}
+	if _, ok := doc["$schema"]; !ok {
+		t.Errorf("top-level $schema dropped: %s", raw)
+	}
+	servers := readMCPServers(t, path)
+	if servers["other"].Command != "keepme" {
+		t.Errorf("unrelated server \"other\" lost: %s", raw)
+	}
+	if servers["app"].Command != "microapp-app" {
+		t.Errorf("new \"app\" server missing: %s", raw)
+	}
+}
+
+func TestConfigureMCPNoSupport(t *testing.T) {
+	t.Parallel()
+	rel, blobs := verifiedRelease("v1.0.0", []byte("bin"))
+	gh := &fakeGH{ // catalog entry with no MCP field
+		catalog:  models.Catalog{Apps: []models.ManifestEntry{{Repo: "o/app", DisplayName: "App"}}},
+		releases: []models.Release{rel},
+		blobs:    blobs,
+	}
+	svc, _ := configured(t, gh)
+	if _, err := svc.Install(context.Background(), "o/app", "", "", false); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	_, err := svc.ConfigureMCP("o/app", t.TempDir())
+	if !errors.Is(err, app.ErrNoMCPSupport) {
+		t.Fatalf("err = %v, want ErrNoMCPSupport", err)
+	}
+
+	// Not installed at all is a distinct, clear error.
+	if _, err := svc.ConfigureMCP("o/ghost", t.TempDir()); err == nil || !strings.Contains(err.Error(), "not installed") {
+		t.Errorf("unknown repo err = %v, want \"not installed\"", err)
+	}
+}
+
+func readMCPServers(t *testing.T, path string) map[string]models.MCPLaunch {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var doc struct {
+		MCPServers map[string]models.MCPLaunch `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	return doc.MCPServers
 }
 
 func TestAppDetails(t *testing.T) {

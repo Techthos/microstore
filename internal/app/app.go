@@ -1,6 +1,6 @@
 // Package app is microstore's use-case layer. It orchestrates the GitHub client,
-// the bbolt repositories, the installer, and the scaffolder into the twelve
-// product use-cases, returning plain domain models. Both internal/server (MCP)
+// the bbolt repositories, the installer, and the scaffolder into the product
+// use-cases, returning plain domain models. Both internal/server (MCP)
 // and internal/tui depend on this package so the orchestration lives in exactly
 // one place.
 package app
@@ -286,6 +286,12 @@ func (s *Service) Update(ctx context.Context, repo string) (UpdateResult, error)
 		return UpdateResult{Installed: *existing, Updated: false, From: existing.Version, To: existing.Version}, nil
 	}
 	entry := models.ManifestEntry{Repo: existing.Repo, DisplayName: existing.DisplayName, Category: existing.Category, Bin: existing.Bin}
+	// Refresh the MCP launch info from the live catalog when available, falling
+	// back to whatever the prior record carried, so an update both gains MCP for
+	// an older record and keeps it when the catalog is briefly unreachable.
+	if entry.MCP = s.lookupEntry(ctx, existing.Repo).MCP; entry.MCP == nil {
+		entry.MCP = existing.MCP
+	}
 	rec, err := s.doInstall(ctx, entry, latest.TagName, "", false)
 	if err != nil {
 		return UpdateResult{}, err

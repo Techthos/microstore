@@ -100,6 +100,7 @@ func (in *Installer) Install(ctx context.Context, entry models.ManifestEntry, re
 		Size:        n,
 		InstalledAt: time.Now().UTC(),
 		SourceURL:   asset.DownloadURL,
+		MCP:         entry.MCP,
 	}, nil
 }
 

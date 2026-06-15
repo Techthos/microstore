@@ -58,6 +58,11 @@ type scaffoldInput struct {
 	Force        bool   `json:"force"`
 }
 
+type configureMCPInput struct {
+	Repo string `json:"repo"`
+	Dir  string `json:"dir"`
+}
+
 // --- tool outputs ---
 
 type catalogOutput struct {
@@ -86,6 +91,10 @@ type verifyOutput struct {
 
 type templatesOutput struct {
 	Templates []models.Template `json:"templates"`
+}
+
+type configureMCPOutput struct {
+	Result app.MCPConfigResult `json:"result"`
 }
 
 type configInput struct {

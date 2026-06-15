@@ -23,10 +23,23 @@ type ManifestEntry struct {
 	Repo        string `json:"repo"` // "owner/name"
 	Category    string `json:"category"`
 	DisplayName string `json:"display_name,omitempty"`
+	// Description is a short, manifest-authored summary of what the app does,
+	// shown alongside the live GitHub metadata.
+	Description string `json:"description,omitempty"`
 	// Bin optionally overrides the repo's bare name in the placed filename:
 	// the installed binary is "microapp-<Bin>" instead of "microapp-<name>".
 	// The catalog uses this to list microstore itself as "microapp-store".
 	Bin string `json:"bin,omitempty"`
+	// MCP, when present, tells an LLM client how to launch this app's MCP
+	// server over stdio (mirrors an .mcp.json entry).
+	MCP *MCPLaunch `json:"mcp,omitempty"`
+}
+
+// MCPLaunch describes how to start a micro-app's MCP server over stdio:
+// an executable plus its arguments, mirroring an .mcp.json server entry.
+type MCPLaunch struct {
+	Command string   `json:"command"`
+	Args    []string `json:"args,omitempty"`
 }
 
 // Template is a catalog-listed starting point for scaffolding a new micro-app.
@@ -80,6 +93,10 @@ type InstalledApp struct {
 	Size        int64     `json:"size"`
 	InstalledAt time.Time `json:"installed_at"`
 	SourceURL   string    `json:"source_url"`
+	// MCP carries the manifest's MCP launch info forward from install, so the
+	// Installed face can wire the app into a project's .mcp.json without a live
+	// catalog fetch. Nil means the app advertises no MCP server.
+	MCP *MCPLaunch `json:"mcp,omitempty"`
 }
 
 // Config is the singleton store configuration persisted under a well-known key.

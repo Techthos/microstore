@@ -70,6 +70,12 @@ func (h *handler) registerTools(s *server.MCPServer) {
 		repoArg()),
 		mcp.NewTypedToolHandler(h.verifyApp))
 
+	s.AddTool(mcp.NewTool("configure_mcp",
+		mcp.WithDescription("Add a tracked install's MCP server to a project's .mcp.json (created or edited in place), leaving other server entries untouched. Errors when the app advertises no MCP server."),
+		repoArg(),
+		mcp.WithString("dir", mcp.Description("Directory whose .mcp.json to write; defaults to the current working directory"))),
+		mcp.NewTypedToolHandler(h.configureMCP))
+
 	s.AddTool(mcp.NewTool("list_templates",
 		mcp.WithDescription("List the manifest's templates, fetched live.")),
 		h.listTemplates)
@@ -168,6 +174,14 @@ func (h *handler) verifyApp(_ context.Context, _ mcp.CallToolRequest, in repoInp
 		return toolErr(err)
 	}
 	return mcp.NewToolResultJSON(verifyOutput{Status: string(st)})
+}
+
+func (h *handler) configureMCP(_ context.Context, _ mcp.CallToolRequest, in configureMCPInput) (*mcp.CallToolResult, error) {
+	res, err := h.app.ConfigureMCP(in.Repo, in.Dir)
+	if err != nil {
+		return toolErr(err)
+	}
+	return mcp.NewToolResultJSON(configureMCPOutput{Result: res})
 }
 
 func (h *handler) listTemplates(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {

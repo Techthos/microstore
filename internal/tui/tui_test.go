@@ -19,6 +19,7 @@ type fakeSvc struct {
 	installed  []models.InstalledApp
 	pathStatus app.PathStatus
 	ranRepo    chan string // when set, RunInstalled reports the repo it was asked to run
+	mcpRepo    chan string // when set, ConfigureMCP reports the repo it was asked to wire up
 }
 
 func (f fakeSvc) ListCatalog(context.Context) ([]models.ManifestEntry, error) { return f.apps, nil }
@@ -46,6 +47,13 @@ func (f fakeSvc) RunInstalled(repo string) (string, error) {
 		f.ranRepo <- repo
 	}
 	return "", errors.New("stub: not executed in test")
+}
+
+func (f fakeSvc) ConfigureMCP(repo, _ string) (app.MCPConfigResult, error) {
+	if f.mcpRepo != nil {
+		f.mcpRepo <- repo
+	}
+	return app.MCPConfigResult{Path: ".mcp.json", Server: repo, Created: true}, nil
 }
 func (fakeSvc) ListTemplates(context.Context) ([]models.Template, error) { return nil, nil }
 func (fakeSvc) Scaffold(context.Context, string, string, string, bool) (app.ScaffoldResult, error) {
@@ -325,6 +333,78 @@ func TestInstalledDoubleClickRunsApp(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		a.Application().Stop()
 		t.Fatal("double-click on the installed row did not trigger RunInstalled within 15s")
+	}
+
+	a.Application().Stop()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after Stop")
+	}
+}
+
+// TestInstalledMKeyConfiguresMCP covers the Installed-screen 'm' action: it wires
+// the highlighted app into the working directory's .mcp.json via the service.
+func TestInstalledMKeyConfiguresMCP(t *testing.T) {
+	mcp := make(chan string, 1)
+	a := New(fakeSvc{
+		installed: []models.InstalledApp{{Repo: "o/app", Version: "v1.0.0"}},
+		mcpRepo:   mcp,
+	})
+
+	sim := tcell.NewSimulationScreen("UTF-8")
+	if err := sim.Init(); err != nil {
+		t.Fatalf("sim init: %v", err)
+	}
+	sim.SetSize(120, 40)
+	a.Application().SetScreen(sim)
+
+	frames := make(chan string, 64)
+	a.Application().SetAfterDrawFunc(func(tcell.Screen) {
+		select {
+		case frames <- screenText(sim):
+		default:
+		}
+	})
+
+	done := make(chan error, 1)
+	go func() { done <- a.Run() }()
+
+	deadline := time.After(15 * time.Second)
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+	switched := false
+	for ready := false; !ready; {
+		select {
+		case txt := <-frames:
+			if !switched {
+				a.Application().QueueEvent(tcell.NewEventKey(tcell.KeyRune, '2', tcell.ModNone))
+				switched = true
+			}
+			if strings.Contains(txt, "o/app") {
+				ready = true
+			}
+		case <-tick.C:
+			a.Application().QueueUpdateDraw(func() {})
+		case <-deadline:
+			a.Application().Stop()
+			t.Fatal("installed row not rendered within 15s")
+		}
+	}
+
+	a.Application().QueueEvent(tcell.NewEventKey(tcell.KeyRune, 'm', tcell.ModNone))
+
+	select {
+	case repo := <-mcp:
+		if repo != "o/app" {
+			t.Errorf("ConfigureMCP repo = %q, want o/app", repo)
+		}
+	case <-time.After(15 * time.Second):
+		a.Application().Stop()
+		t.Fatal("'m' on the installed row did not trigger ConfigureMCP within 15s")
 	}
 
 	a.Application().Stop()

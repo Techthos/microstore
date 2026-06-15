@@ -36,6 +36,7 @@ type Service interface {
 	Uninstall(repo string) error
 	Verify(repo string) (install.VerifyStatus, error)
 	RunInstalled(repo string) (string, error)
+	ConfigureMCP(repo, dir string) (app.MCPConfigResult, error)
 	ListTemplates(ctx context.Context) ([]models.Template, error)
 	Scaffold(ctx context.Context, templateRepo, targetDir, ref string, force bool) (app.ScaffoldResult, error)
 	GetConfig() (models.Config, error)
@@ -708,6 +709,9 @@ func (a *App) installedKeys(ev *tcell.EventKey) *tcell.EventKey {
 	case 'v':
 		a.actionInstalled("verify")
 		return nil
+	case 'm':
+		a.actionInstalled("mcp")
+		return nil
 	case 'r':
 		a.setStatus("refreshing…")
 		go a.loadInstalled()
@@ -779,6 +783,11 @@ func (a *App) actionInstalled(action string) {
 	case "verify":
 		for _, r := range targets {
 			a.doVerify(r)
+		}
+		a.clearChecked()
+	case "mcp":
+		for _, r := range targets {
+			a.doConfigureMCP(r)
 		}
 		a.clearChecked()
 	}
@@ -918,6 +927,32 @@ func (a *App) doUninstall(repo string) {
 			delete(a.verifyState, repo)
 			a.setStatus("[green]✓ uninstalled %s", repo)
 			go a.loadInstalled()
+		})
+	}()
+}
+
+// doConfigureMCP wires the install into the .mcp.json of the directory microstore
+// was launched from (the use-case resolves "" to the working directory). A no-MCP
+// app is a benign outcome surfaced as a warning, not a red error.
+func (a *App) doConfigureMCP(repo string) {
+	a.busy++
+	a.setStatus("configuring MCP for %s…", repo)
+	go func() {
+		res, err := a.svc.ConfigureMCP(repo, "")
+		a.app.QueueUpdateDraw(func() {
+			a.busy--
+			switch {
+			case errors.Is(err, app.ErrNoMCPSupport):
+				a.setStatus("[yellow]%s advertises no MCP server", repo)
+			case err != nil:
+				a.setStatus("[red]mcp: %s", err.Error())
+			case res.Created:
+				a.setStatus("[green]✓ created %s with %s", res.Path, res.Server)
+			case res.Updated:
+				a.setStatus("[green]✓ updated %s in %s", res.Server, res.Path)
+			default:
+				a.setStatus("[green]✓ added %s to %s", res.Server, res.Path)
+			}
 		})
 	}()
 }

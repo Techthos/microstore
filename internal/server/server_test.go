@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -191,7 +192,7 @@ func TestListToolsExposesFullSurface(t *testing.T) {
 	want := []string{
 		"get_config", "set_config",
 		"list_catalog", "search_apps", "app_details", "list_releases", "list_installed",
-		"install_app", "update_app", "uninstall_app", "verify_app", "list_templates", "scaffold_app",
+		"install_app", "update_app", "uninstall_app", "verify_app", "configure_mcp", "list_templates", "scaffold_app",
 	}
 	for _, name := range want {
 		if !got[name] {
@@ -323,6 +324,57 @@ func TestInstallToolSuccess(t *testing.T) {
 	}](t, call(t, c, "uninstall_app", map[string]any{"repo": "o/app"}))
 	if !ures.Removed {
 		t.Errorf("removed = false, want true")
+	}
+}
+
+func TestConfigureMCPTool(t *testing.T) {
+	t.Parallel()
+	rel, blobs := verifiedRelease("v1.0.0", []byte("bin"))
+	gh := &fakeGH{
+		catalog: models.Catalog{Apps: []models.ManifestEntry{{
+			Repo: "o/app", DisplayName: "App",
+			MCP: &models.MCPLaunch{Command: "microapp-app", Args: []string{"mcp"}},
+		}}},
+		releases: []models.Release{rel},
+		blobs:    blobs,
+	}
+	c := newClient(t, gh, "https://manifest")
+	if res := call(t, c, "install_app", map[string]any{"repo": "o/app"}); res.IsError {
+		t.Fatalf("install errored: %s", resultText(t, res))
+	}
+
+	dir := t.TempDir()
+	res := call(t, c, "configure_mcp", map[string]any{"repo": "o/app", "dir": dir})
+	if res.IsError {
+		t.Fatalf("configure_mcp errored: %s", resultText(t, res))
+	}
+	out := decode[struct {
+		Result app.MCPConfigResult `json:"result"`
+	}](t, res)
+	if !out.Result.Created || out.Result.Server != "app" {
+		t.Errorf("result = %+v, want Created server \"app\"", out.Result)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, ".mcp.json"))
+	if err != nil {
+		t.Fatalf("read .mcp.json: %v", err)
+	}
+	var doc struct {
+		MCPServers map[string]models.MCPLaunch `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse .mcp.json: %v", err)
+	}
+	if got := doc.MCPServers["app"]; got.Command != "microapp-app" {
+		t.Errorf("server entry = %+v, want command microapp-app", got)
+	}
+
+	// An app with no MCP launch info surfaces as a tool-level error result.
+	gh.catalog.Apps = append(gh.catalog.Apps, models.ManifestEntry{Repo: "o/plain", DisplayName: "Plain"})
+	if res := call(t, c, "install_app", map[string]any{"repo": "o/plain"}); res.IsError {
+		t.Fatalf("install plain errored: %s", resultText(t, res))
+	}
+	if res := call(t, c, "configure_mcp", map[string]any{"repo": "o/plain", "dir": dir}); !res.IsError {
+		t.Errorf("configure_mcp for no-MCP app: want error result, got %s", resultText(t, res))
 	}
 }
 

@@ -4,17 +4,48 @@
       "repo": "Techthos/microstore",
       "category": "tools",
       "display_name": "microstore",
-      "bin": "store"
+      "description": "Single-binary local app store for Go micro-apps: browse a GitHub catalog, install/verify release binaries, and scaffold new apps.",
+      "bin": "store",
+      "mcp": {
+        "command": "microapp-store",
+        "args": ["mcp"]
+      }
     },
     {
       "repo": "Techthos/clockwork",
       "category": "tools",
-      "display_name": "clockwork"
+      "display_name": "clockwork",
+      "description": "Time tracking and scheduling helper.",
+      "mcp": {
+        "command": "microapp-clockwork",
+        "args": ["mcp"]
+      }
+    },
+    {
+      "repo": "Techthos/microapp-deskbluez",
+      "category": "tools",
+      "display_name": "deskbluez",
+      "description": "Bluetooth desk and device management utility.",
+      "mcp": {
+        "command": "microapp-deskbluez",
+        "args": ["serve"]
+      }
+    },
+    {
+      "repo": "Techthos/microapp-crm",
+      "category": "tools",
+      "display_name": "CRM",
+      "description": "Lightweight customer relationship management for contacts and deals.",
+      "mcp": {
+        "command": "microapp-crm",
+        "args": ["-mode", "mcp"]
+      }
     },
     {
       "repo": "Techthos/gofolio",
       "category": "tools",
-      "display_name": "gofolio"
+      "display_name": "gofolio",
+      "description": "Personal portfolio and asset tracker."
     }
   ],
   "templates": []

@@ -78,7 +78,8 @@ storage-agnostic (no bbolt imports). Serialization is **JSON** throughout.
 | Entity | Source | Key attributes |
 |---|---|---|
 | `Catalog` | manifest (`catalog.json`) | `Apps []ManifestEntry`, `Templates []Template` |
-| `ManifestEntry` | manifest | `Repo` (`owner/name`), `Category`, `DisplayName` (optional), `Bin` (optional — overrides the repo's bare name in the placed `microapp-<name>` filename) |
+| `ManifestEntry` | manifest | `Repo` (`owner/name`), `Category`, `DisplayName` (optional), `Description` (optional — short manifest-authored summary), `Bin` (optional — overrides the repo's bare name in the placed `microapp-<name>` filename), `MCP` (optional `MCPLaunch` — how to launch the app's MCP server over stdio) |
+| `MCPLaunch` | manifest | `Command` (executable), `Args` (optional arguments) — mirrors an `.mcp.json` stdio server entry |
 | `Template` | manifest | `Repo` (`owner/name`), `Ref` (branch/tag), `Name`, `Description` |
 | `RepoInfo` | GitHub repo API | `FullName`, `Description`, `Homepage`, `Stars` |
 | `Release` | GitHub releases API | `TagName`, `Name`, `Body`, `PublishedAt` (time), `Prerelease` (bool), `Assets []Asset` |
@@ -88,7 +89,7 @@ storage-agnostic (no bbolt imports). Serialization is **JSON** throughout.
 
 | Entity | Identity | Key attributes |
 |---|---|---|
-| `InstalledApp` | `Repo` (`owner/name`) — natural unique key | `Repo`, `DisplayName`, `Category`, `Bin` (manifest override, kept so updates re-place at the same filename), `Version` (installed tag), `AssetName`, `Path` (absolute), `SHA256`, `Size`, `InstalledAt` (time), `SourceURL` |
+| `InstalledApp` | `Repo` (`owner/name`) — natural unique key | `Repo`, `DisplayName`, `Category`, `Bin` (manifest override, kept so updates re-place at the same filename), `Version` (installed tag), `AssetName`, `Path` (absolute), `SHA256`, `Size`, `InstalledAt` (time), `SourceURL`, `MCP` (optional `MCPLaunch` carried forward from the manifest entry at install, so UC 14 can wire the app into a `.mcp.json` without a live catalog fetch; nil ⇒ no MCP server) |
 | `Config` | singleton | `ManifestURL`, `InstallDir`; plus TUI view-prefs `LastSection`, `SidebarCollapsed` |
 
 ### Relationships
@@ -208,10 +209,19 @@ Each use-case names the entities, the surface(s), and the repository/service ope
     before launch — a record whose binary is missing or is a directory yields a clear status error
     and launches nothing. *Ops:* `InstallRepo.Get` + `os.Stat` (path resolution); the process exec
     lives in the view layer. No network, no bbolt write.
+14. **Configure an installed app's MCP server into a project.** *Entities:* `InstalledApp`,
+    `MCPLaunch`. *Surfaces:* TUI, MCP. For an installed app that carries MCP launch info (`MCP`,
+    persisted from the manifest entry at install time), create or edit a project-local `.mcp.json`
+    (in a target directory, default the current working directory) and add — or replace — a single
+    `mcpServers` entry built from the recorded `command` + `args`, keyed by a slug derived from the
+    app's display name (else the repo's bare name). Every other server entry and top-level key in the
+    file is preserved; a present-but-malformed file is an error (never silently overwritten). An app
+    that advertises no MCP server is reported as a clear no-op, not a failure. *Ops:* `InstallRepo.Get`
+    + read/modify/write `.mcp.json`. No network, no bbolt write.
 
 ## User Stories
 
-**Consuming (TUI) — UC 2–10, 13**
+**Consuming (TUI) — UC 2–10, 13, 14**
 - As an operator, I want to browse the catalog of available micro-apps so I can see what exists. *(UC 2)*
 - As an operator, I want to search/filter by name and category so I can find an app quickly. *(UC 3)*
 - As an operator, I want to open an app and read its description, releases, and assets so I can decide
@@ -221,16 +231,20 @@ Each use-case names the entities, the surface(s), and the repository/service ope
 - As an operator, I want to see what I've installed, update it, uninstall it, or re-verify it. *(UC 7–10)*
 - As an operator, I want to launch an installed micro-app from inside microstore so I can run it
   without leaving the store and find it again when it exits. *(UC 13)*
+- As an operator, I want to add an installed micro-app's MCP server to the `.mcp.json` of the folder
+  I'm working in so an LLM client picks it up, without hand-editing the file. *(UC 14)*
 
 **Creating (TUI) — UC 11–12**
 - As a developer, I want to pick a starting template and scaffold a new project into a directory, then
   drop straight into `/product-idea`, so I can begin a new micro-app immediately. *(UC 11, UC 12)*
 
-**Automation (MCP) — UC 2–12**
+**Automation (MCP) — UC 2–12, 14**
 - As an LLM client, I want tools to browse/search/inspect the catalog and list installs so I can
   reason about available and installed apps. *(UC 2–5, 7, 11)*
 - As an LLM client, I want tools to install, update, uninstall, verify, and scaffold so I can manage
   the local app set and bootstrap new apps on the user's behalf. *(UC 6, 8, 9, 10, 12)*
+- As an LLM client, I want a tool to wire an installed app's MCP server into a project's `.mcp.json`
+  so I can extend my own tool surface on the user's behalf. *(UC 14)*
 
 **Shared — UC 1**
 - As any user, I want to configure the manifest URL and install directory once and have them
@@ -259,6 +273,7 @@ Non-trivial inputs use typed handlers with `jsonschema`-tagged structs. **All lo
 | `update_app` | Upgrade to latest (UC 8) | `{ repo: string }` | `{ installed: InstalledApp, updated: bool, from: string, to: string }` |
 | `uninstall_app` | Remove binary + record (UC 9) | `{ repo: string }` | `{ removed: bool }` |
 | `verify_app` | Re-check SHA-256 (UC 10) | `{ repo: string }` | `{ status: "ok"\|"mismatch"\|"missing" }` |
+| `configure_mcp` | Add an install's MCP server to a project's `.mcp.json` (UC 14) | `{ repo: string, dir?: string }` | `{ result: { path: string, server: string, created: bool, updated: bool } }`; no-MCP app → error result |
 | `list_templates` | Manifest templates (UC 11) | — | `{ templates: Template[] }` |
 | `scaffold_app` | Extract template + hand off (UC 12) | `{ template_repo: string, target_dir: string, ref?: string, force?: bool }` | `{ target_dir: string, files: int, next_step: string }` (instructs caller to run `/product-idea`) |
 
@@ -273,10 +288,11 @@ Non-trivial inputs use typed handlers with `jsonschema`-tagged structs. **All lo
 ### Prompts
 None in v1 (see Open Questions).
 
-> **Note on mutation via MCP.** `install_app`, `update_app`, `uninstall_app`, and `scaffold_app`
-> perform network downloads and filesystem writes (including `chmod` and tarball extraction). Path
-> inputs (`target_dir`, install dir) are cleaned and confined; tarball entries are checked against
-> path traversal before extraction.
+> **Note on mutation via MCP.** `install_app`, `update_app`, `uninstall_app`, `scaffold_app`, and
+> `configure_mcp` perform network downloads and/or filesystem writes (downloads, `chmod`, tarball
+> extraction, and — for `configure_mcp` — writing `.mcp.json`). Path inputs (`target_dir`, install
+> dir, `dir`) are cleaned and confined; tarball entries are checked against path traversal before
+> extraction.
 >
 > **No `run_app` tool (UC 13 is TUI-only).** Launching an installed micro-app means handing it the
 > controlling terminal — which the stdio MCP server cannot do, since its stdout *is* the protocol
@@ -310,7 +326,8 @@ a **sidebar · body · status-bar** skeleton with four navigable sections, set o
 [2] Installed   Master-detail: Table (Repo, Version, Installed-relative, last verify state) left +
    │            full record (absolute time, path, verify) right. Keys: [Enter]/double-click run
    │            (app.Suspend → exec the binary, restore on exit), [u] update, [d] uninstall (Modal confirm,
-   │            defaults to Cancel), [v] verify, [r] refresh, [Space] multi-select (bulk action
+   │            defaults to Cancel), [v] verify, [m] add to the working dir's `.mcp.json` (UC 14;
+   │            warns when the app has no MCP server), [r] refresh, [Space] multi-select (bulk action
    │            confirms with a count). `/` filter.
 [3] New App     Form: choose Template (from manifest) + Target dir. [Ctrl-S] scaffold ⇒ extract ⇒
    │            app.Suspend → launch `claude /product-idea` (or print the command if absent).
@@ -362,9 +379,11 @@ lists, `Ctrl`-chords in forms):
   TUI (`app.Suspend`) and execs the recorded binary with inherited stdin/stdout/stderr, restoring
   the TUI when the child exits (UC 13). A single click only selects (updating the detail pane).
   `u` update, `d` uninstall (confirm via `Modal` defaulting to Cancel; the wording names
-  the target or the count), `v` re-verify; `Space` toggles a per-row check and `u`/`d`/`v` then
-  apply to all checked rows (single batch confirm) — or to the highlighted row when none are
-  checked. Results update the row and the detail pane.
+  the target or the count), `v` re-verify, `m` add the app's MCP server to the working directory's
+  `.mcp.json` (UC 14; a `[yellow]` status when the app advertises no MCP server); `Space` toggles a
+  per-row check and `u`/`d`/`v`/`m` then apply to all checked rows (single batch confirm for
+  destructive actions) — or to the highlighted row when none are checked. Results update the row and
+  the detail pane, or land in the status bar as a colored `✓`/`✗`.
 - **New App / Config:** a `Form`; `Ctrl-S` saves (scaffold / persist), `Esc` cancels (prompts
   `Discard changes?` when dirty). Fields validate live: the error shows inline beneath the form in
   red and a blocked save focuses the first offending field. Config save preserves the TUI view-prefs
@@ -422,6 +441,15 @@ lists, `Ctrl`-chords in forms):
   TUI is restored and the status bar reports the return. (A single click only selects the row.) No
   MCP tool exposes this (the stdio server cannot own a terminal). No bbolt
   write occurs.
+- **UC 14 — Configure MCP:** `ConfigureMCP(repo, dir)` on an installed app that carries MCP launch
+  info creates `<dir>/.mcp.json` when absent (`created: true`) with one `mcpServers` entry whose
+  `command`/`args` equal the recorded launch info, keyed by the display-name slug; a second call
+  replaces that same entry in place (`updated: true`, no duplicate). Editing an existing file
+  preserves every other `mcpServers` entry and unrelated top-level key; a malformed file is an error
+  and is not overwritten. An installed app with no MCP launch info yields `ErrNoMCPSupport`
+  (surfaced as a `[yellow]` no-op in the TUI and an error result via MCP), and an unknown slug yields
+  a clear "not installed" error. `dir` defaults to the current working directory. No bbolt write
+  occurs.
 - **`init` mode:** In a directory with no `.claude` entry, `microstore init` places the embedded
   bootstrap kit byte-for-byte (`.claude/commands`, `.claude/rules`, `.claude/skills`) and prints the
   phase guide naming `/product-idea`, `/app-init`, and `/app-spec-sync` in that order plus the
@@ -453,8 +481,9 @@ lists, `Ctrl`-chords in forms):
   surfaces the limit/reset. *Assumption accepted.*
 - **Manifest schema.** `catalog.json` is `{ "apps": ManifestEntry[], "templates": Template[] }`, fetched
   from `Config.ManifestURL` (a raw JSON URL). App entries are **minimal** (`repo`, `category`, optional
-  `display_name`, optional `bin`); richer metadata is read live from GitHub. *Assumption — finalize the
-  exact field names with the first published manifest.*
+  `display_name`, optional `description`, optional `bin`, optional `mcp` — an `{ command, args }`
+  launch object for the app's MCP server); richer metadata is read live from GitHub. *Assumption —
+  finalize the exact field names with the first published manifest.*
 - **Self-hosting.** The curated catalog lists microstore itself (`Techthos/microstore`, `bin: "store"`),
   so the store installs and updates itself as `microapp-store` alongside the apps it manages. The
   `scripts/install.sh` bootstrap places that same file (`microapp-store` in the default `InstallDir`,
